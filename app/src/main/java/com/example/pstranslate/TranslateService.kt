@@ -70,7 +70,7 @@ class TranslateService : Service() {
             TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build()
         )
         translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
-            .addOnSuccessListener { handler.post(::tick) }
+            .addOnSuccessListener { handler.post { tick() } }
             .addOnFailureListener { stopSelf() }
         return START_NOT_STICKY
     }
@@ -118,7 +118,7 @@ class TranslateService : Service() {
             )
         } else {
             display!!.resize(m.widthPixels, m.heightPixels, m.densityDpi)
-            display!!.surface = reader!!.surface
+            display!!.setSurface(reader!!.surface)
         }
     }
 
@@ -134,10 +134,10 @@ class TranslateService : Service() {
             val ov = overlay
             if (ov != null && ov.hasItems()) {
                 ov.alpha = 0f               // \u0646\u062e\u0641\u064a \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0644\u062d\u0638\u0629 \u0627\u0644\u0627\u0644\u062a\u0642\u0627\u0637 \u0643\u064a \u0644\u0627 \u062a\u064f\u0642\u0631\u0623 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649
-                handler.postDelayed(::grab, 150)
+                handler.postDelayed({ grab() }, 150)
             } else grab()
         }
-        handler.postDelayed(::tick, 1500)
+        handler.postDelayed({ tick() }, 1500)
     }
 
     private fun grab() {
@@ -155,27 +155,48 @@ class TranslateService : Service() {
     }
 
     private fun translateBlocks(blocks: List<Text.TextBlock>) {
-        if (blocks.isEmpty()) { overlay?.setItems(emptyList()); lastKey = ""; busy = false; return }
-        val key = blocks.joinToString("|") { it.text }
-        if (key == lastKey) { busy = false; return }
+        if (blocks.isEmpty()) {
+            overlay?.setItems(emptyList())
+            lastKey = ""
+            busy = false
+            return
+        }
+        val key = blocks.joinToString("|") { b -> b.text }
+        if (key == lastKey) {
+            busy = false
+            return
+        }
 
-        val out = arrayOfNulls<Pair<Rect, String>>(blocks.size)
-        var left = blocks.size
-        blocks.forEachIndexed { i, b ->
-            val src = b.text.replace("\n", " ")
-            val done = { t: String ->
-                out[i] = Pair(b.boundingBox!!, t)
-                if (--left == 0) {
-                    overlay?.setItems(out.filterNotNull())
+        val results = ArrayList<Pair<Rect, String>?>()
+        for (n in blocks.indices) results.add(null)
+        val remaining = intArrayOf(blocks.size)
+
+        for (i in blocks.indices) {
+            val block = blocks[i]
+            val src = block.text.replace("\n", " ")
+            val rect = block.boundingBox ?: Rect()
+            val onDone = fun(translated: String) {
+                results[i] = Pair(rect, translated)
+                remaining[0] = remaining[0] - 1
+                if (remaining[0] == 0) {
+                    overlay?.setItems(results.filterNotNull())
                     lastKey = key
                     busy = false
                 }
             }
             val hit = cache[src]
-            if (hit != null) done(hit)
-            else translator!!.translate(src)
-                .addOnSuccessListener { cache[src] = it; done(it) }
-                .addOnFailureListener { done(src) }
+            if (hit != null) {
+                onDone(hit)
+            } else {
+                translator!!.translate(src)
+                    .addOnSuccessListener { res: String ->
+                        cache.put(src, res)
+                        onDone(res)
+                    }
+                    .addOnFailureListener { _: Exception ->
+                        onDone(src)
+                    }
+            }
         }
     }
 
