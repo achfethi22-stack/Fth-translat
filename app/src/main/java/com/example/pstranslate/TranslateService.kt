@@ -84,8 +84,8 @@ class TranslateService : Service() {
         )
         val n = Notification.Builder(this, "ps")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("الترجمة تعمل")
-            .addAction(Notification.Action.Builder(null, "إيقاف", stop).build())
+            .setContentTitle("\u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u062a\u0639\u0645\u0644")
+            .addAction(Notification.Action.Builder(null, "\u0625\u064a\u0642\u0627\u0641", stop).build())
             .build()
         if (Build.VERSION.SDK_INT >= 29)
             startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -133,7 +133,7 @@ class TranslateService : Service() {
             busy = true
             val ov = overlay
             if (ov != null && ov.hasItems()) {
-                ov.alpha = 0f               // نخفي الترجمة لحظة الالتقاط كي لا تُقرأ مرة أخرى
+                ov.alpha = 0f               // \u0646\u062e\u0641\u064a \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0644\u062d\u0638\u0629 \u0627\u0644\u0627\u0644\u062a\u0642\u0627\u0637 \u0643\u064a \u0644\u0627 \u062a\u064f\u0642\u0631\u0623 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649
                 handler.postDelayed(::grab, 150)
             } else grab()
         }
