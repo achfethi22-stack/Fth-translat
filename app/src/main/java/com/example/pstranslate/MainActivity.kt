@@ -17,8 +17,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 class MainActivity : ComponentActivity() {
 
     private val langs = listOf(
-        "en" to "English", "fr" to "Fran\xe7ais", "es" to "Espa\xf1ol",
-        "de" to "Deutsch", "it" to "Italiano", "pt" to "Portugu\xeas", "tr" to "T\xfcrk\xe7e"
+        "en" to "English", "fr" to "Fran\u00e7ais", "es" to "Espa\u00f1ol",
+        "de" to "Deutsch", "it" to "Italiano", "pt" to "Portugu\u00eas", "tr" to "T\u00fcrk\u00e7e"
     )
     private lateinit var spinner: Spinner
 
@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
 
     private fun start() {
         if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "\u0641\u0639\u0651\u0644 \xab\u0627\u0644\u0639\u0631\u0636 \u0641\u0648\u0642 \u0627\u0644\u062a\u0637\u0628\u064a\u0642\u0627\u062a\xbb \u062b\u0645 \u0627\u0631\u062c\u0639", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "\u0641\u0639\u0651\u0644 \u00ab\u0627\u0644\u0639\u0631\u0636 \u0641\u0648\u0642 \u0627\u0644\u062a\u0637\u0628\u064a\u0642\u0627\u062a\u00bb \u062b\u0645 \u0627\u0631\u062c\u0639", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return
         }
