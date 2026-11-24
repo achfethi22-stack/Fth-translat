@@ -1,81 +1,46 @@
 package com.example.pstranslate
 
-import android.Manifest
-import android.app.Activity
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionManager
-import android.net.Uri
-import android.os.Build
-import android.os.Bundle
-import android.provider.Settings
-import android.view.Gravity
-import android.widget.*
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.graphics.*
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
+import android.text.TextPaint
+import android.view.View
 
-class MainActivity : ComponentActivity() {
+class OverlayView(context: Context) : View(context) {
+    private var items: List<Pair<Rect, String>> = emptyList()
+    private val bg = Paint().apply { color = 0xE6000000.toInt() }
+    private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
 
-    private val langs = listOf(
-        "en" to "English", "fr" to "Français", "es" to "Español",
-        "de" to "Deutsch", "it" to "Italiano", "pt" to "Português", "tr" to "Türkçe"
-    )
-    private lateinit var spinner: Spinner
+    fun hasItems() = items.isNotEmpty()
 
-    private val captureLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-            if (r.resultCode == Activity.RESULT_OK && r.data != null) {
-                val i = Intent(this, TranslateService::class.java)
-                    .putExtra("code", r.resultCode)
-                    .putExtra("data", r.data)
-                    .putExtra("lang", langs[spinner.selectedItemPosition].first)
-                startForegroundService(i)
-                Toast.makeText(this, "تم التشغيل. افتح PS Remote Play الآن", Toast.LENGTH_LONG).show()
-                moveTaskToBack(true)
-            }
-        }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(56, 120, 56, 56)
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        root.addView(TextView(this).apply {
-            text = "مترجم ألعاب PS5\nيترجم النص الظاهر على الشاشة إلى العربية فوق PS Remote Play"
-            textSize = 18f
-            gravity = Gravity.CENTER
-        })
-        root.addView(TextView(this).apply { text = "\nلغة اللعبة:" })
-        spinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, langs.map { it.second })
-        }
-        root.addView(spinner)
-        root.addView(Button(this).apply {
-            text = "ابدأ الترجمة"
-            setOnClickListener { start() }
-        })
-        root.addView(Button(this).apply {
-            text = "إيقاف"
-            setOnClickListener {
-                startService(Intent(this@MainActivity, TranslateService::class.java).setAction(TranslateService.ACTION_STOP))
-            }
-        })
-        setContentView(root)
+    fun setItems(list: List<Pair<Rect, String>>) {
+        items = list
+        invalidate()
     }
 
-    private fun start() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "فعّل «العرض فوق التطبيقات» ثم ارجع", Toast.LENGTH_LONG).show()
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            return
+    override fun onDraw(canvas: Canvas) {
+        for ((r, text) in items) {
+            val w = maxOf(r.width(), 260).coerceAtMost(width)
+            val left = r.left.coerceAtMost(width - w).coerceAtLeast(0)
+            var size = 44f
+            var layout: StaticLayout
+            while (true) {
+                tp.textSize = size
+                layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, w)
+                    .setTextDirection(TextDirectionHeuristics.RTL)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .build()
+                if (layout.height <= r.height() + 8 || size <= 20f) break
+                size -= 2f
+            }
+            val h = maxOf(layout.height, r.height())
+            canvas.drawRect(left.toFloat(), r.top.toFloat(), (left + w).toFloat(), (r.top + h).toFloat(), bg)
+            canvas.save()
+            canvas.translate(left.toFloat(), r.top.toFloat())
+            layout.draw(canvas)
+            canvas.restore()
         }
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-
-        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        captureLauncher.launch(mpm.createScreenCaptureIntent())
     }
 }
