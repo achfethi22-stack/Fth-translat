@@ -15,10 +15,12 @@ class OverlayView(context: Context) : View(context) {
     var fontSize = 44f
     var above = true
     
+    // خلفية النص (سوداء شفافة)
     private val bg = Paint().apply { 
         color = 0xCC000000.toInt()
         cornerRadius = 16f
     }
+    
     private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { 
         color = Color.WHITE 
         textAlign = Paint.Align.CENTER
@@ -34,7 +36,7 @@ class OverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
         for ((r, text) in items) {
-            val pad = 24f // ✅ تحويل إلى Float
+            val pad = 24f // تم استخدام Float هنا
             tp.textSize = fontSize
             
             val minW = (width * 0.6f).toInt()
@@ -46,22 +48,26 @@ class OverlayView(context: Context) : View(context) {
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
                 
-            val boxH = layout.height + (pad * 2).toInt()
+            val boxH = layout.height.toFloat() + (pad * 2)
             
-            // ✅ ضمان أن كل القيم من نوع Float
+            // حساب الموقع الأفقي (في المنتصف تماماً)
             val left = (width - w) / 2f
-            var top = if (above) r.top - boxH - 12f else r.bottom + 12f
-            if (above && top < 0f) top = r.bottom + 12f
-            top = top.coerceIn(0f, height - boxH.toFloat())
             
-            canvas.drawRect(left, top, left + w, top + boxH, bg)
+            // حساب الموقع العمودي
+            var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
+            if (above && top < 0f) top = r.bottom.toFloat() + 12f
+            top = top.coerceIn(0f, height.toFloat() - boxH)
             
+            // رسم الخلفية
+            canvas.drawRect(left, top, left + w.toFloat(), top + boxH, bg)
+            
+            // رسم النص
             canvas.save()
             canvas.translate(left + pad, top + pad)
             layout.draw(canvas)
             canvas.restore()
             
-            // ✅ تحويل القيم إلى Int هنا فقط عند الحفظ في المصفوفة
+            // حفظ الإحداثيات
             drawn.add(Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + boxH).toInt()))
         }
     }
