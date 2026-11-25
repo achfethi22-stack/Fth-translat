@@ -50,14 +50,14 @@ class TranslateService : Service() {
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
 
-        const val CLAUDE_MODEL = "claude-haiku-5-5"
-        const val GROQ_MODEL = "llama-3.3-70b-versatile"
-        val GEMINI_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+        const val CLAUDE_MODEL = "claude-3-5-haiku-20241022" // ✅ تم التصحيح
+        const val GROQ_MODEL = "llama-3.1-8b-instant"        // ✅ تم التصحيح
+        val GEMINI_MODELS = listOf("gemini-1.5-flash", "gemini-1.5-pro") // ✅ أسماء مستقرة
         const val MAX_SIDE = 1280f
 
         // ✅ تحسين: تقليل زمن الانتظار بين الطلبات
-        const val MIN_API_GAP_GEMINI = 1200L   // كان 4000
-        const val MIN_API_GAP_GROQ = 600L      // كان 2000
+        const val MIN_API_GAP_GEMINI = 1200L
+        const val MIN_API_GAP_GROQ = 600L
         const val MIN_API_GAP_CLAUDE = 1200L
 
         const val SYSTEM = "You translate on-screen video game text into Arabic. " +
@@ -117,9 +117,11 @@ class TranslateService : Service() {
 
         val prefs = getSharedPreferences("prefs", MODE_PRIVATE)
         engine = prefs.getInt("engine", 0)
-        claudeKey = prefs.getString("api_key", "") ?: ""
-        geminiKey = prefs.getString("gemini_key", "") ?: ""
-        groqKey = prefs.getString("groq_key", "") ?: ""
+        // ✅ إضافة trim() لتنظيف المفاتيح من أي مسافات
+        claudeKey = (prefs.getString("api_key", "") ?: "").trim()
+        geminiKey = (prefs.getString("gemini_key", "") ?: "").trim()
+        groqKey = (prefs.getString("groq_key", "") ?: "").trim()
+        
         val lang = prefs.getString("lang", "en") ?: "en"
         if ((engine == 0 && geminiKey.isEmpty()) ||
             (engine == 1 && claudeKey.isEmpty()) ||
@@ -491,6 +493,9 @@ class TranslateService : Service() {
     }
 
     private fun handleError(err: String) {
+        // ✅ سطر جديد: طباعة الخطأ الحقيقي في Logcat للتشخيص
+        android.util.Log.e("PS_TRANSLATE", "API Error: $err")
+        
         val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") ||
             err.contains("API_KEY_INVALID") || err.contains("API key not valid")
         if (keyError) {
@@ -756,11 +761,3 @@ class SelectView(context: Context, private val onDone: (Float, Float, Float, Flo
             }
         }
         invalidate()
-        return true
-    }
-}
-
-class OcrLine(var rect: Rect, var h: Int) {
-    val pieces = ArrayList<Pair<Int, String>>()
-    fun text(): String = pieces.sortedBy { p -> p.first }.joinToString(" ") { p -> p.second }
-}
