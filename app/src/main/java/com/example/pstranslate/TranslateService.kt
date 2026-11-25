@@ -31,6 +31,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.*
 import java.util.concurrent.Executors
+import kotlin.math.max
 
 class TranslateService : Service() {
     companion object {
@@ -38,8 +39,8 @@ class TranslateService : Service() {
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
 
-        // ✅ الاحتفاظ فقط بـ Gemini
-        val GEMINI_MODELS = listOf("gemini-2.0-flash", "gemini-1.5-flash-latest") 
+        // ✅ تحديث نماذج Gemini لتجنب خطأ 404
+        val GEMINI_MODELS = listOf("gemini-3.8-flash", "gemini-3.6-flash")
         const val MAX_SIDE = 1280f
         const val MIN_API_GAP_GEMINI = 1200L
 
@@ -95,7 +96,6 @@ class TranslateService : Service() {
         geminiKey = (prefs.getString("gemini_key", "") ?: "").trim()
         val lang = prefs.getString("lang", "en") ?: "en"
         
-        // إذا اختار Gemini ولم يكن المفتاح موجوداً، يتوقف
         if (engine == 0 && geminiKey.isEmpty()) {
             stopSelf(); return START_NOT_STICKY
         }
@@ -116,7 +116,8 @@ class TranslateService : Service() {
         setupDisplay()
         warmup()
 
-        if (engine == 2) {
+        // ✅ تم تعديل الرقم إلى 1 (بدون إنترنت)
+        if (engine == 1) {
             val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
             translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build())
             translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
@@ -129,7 +130,7 @@ class TranslateService : Service() {
     }
 
     private fun warmup() {
-        if (engine == 2) return
+        if (engine == 1) return // ✅ تم تعديل الرقم إلى 1
         net.execute {
             try { callGemini(listOf("hi")) } catch (_: Exception) {}
         }
@@ -255,7 +256,8 @@ class TranslateService : Service() {
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
-        if (engine == 2) { translateOffline(missing, srcs, rects, key); return }
+        // ✅ تم تعديل الرقم إلى 1 (بدون إنترنت)
+        if (engine == 1) { translateOffline(missing, srcs, rects, key); return }
 
         val now = System.currentTimeMillis()
         if (now - lastApi < MIN_API_GAP_GEMINI) {
@@ -458,6 +460,63 @@ class TranslateService : Service() {
         if (::wm.isInitialized) { removeSelector(); overlay?.let { v -> runCatching { wm.removeView(v) } } }
         display?.release(); reader?.close(); projection?.stop(); translator?.close(); recognizer.close()
         super.onDestroy()
+    }
+}
+
+// ✅ تم إصلاح كلاس OverlayView ليعرض النص في المنتصف
+class OverlayView(context: Context) : View(context) {
+    private var items: List<Pair<Rect, String>> = emptyList()
+    val drawn = ArrayList<Rect>()
+    var fontSize = 44f
+    var above = true
+    
+    private val bg = Paint().apply { 
+        color = 0xCC000000.toInt()
+    }
+    
+    private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { 
+        color = Color.WHITE 
+        textAlign = Paint.Align.CENTER
+    }
+
+    fun hasItems() = items.isNotEmpty()
+
+    fun setItems(list: List<Pair<Rect, String>>) {
+        items = list
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        drawn.clear()
+        for ((r, text) in items) {
+            val pad = 24f
+            tp.textSize = fontSize
+            
+            val minW = (width * 0.6f).toInt()
+            val w = max(r.width() + (pad * 2).toInt(), minW).coerceAtMost(width - 32)
+            val innerW = w - (pad * 2).toInt()
+            
+            val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, innerW)
+                .setTextDirection(TextDirectionHeuristics.RTL)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .build()
+                
+            val boxH = layout.height.toFloat() + (pad * 2)
+            val left = (width - w) / 2f
+            var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
+            if (above && top < 0f) top = r.bottom.toFloat() + 12f
+            top = top.coerceIn(0f, height.toFloat() - boxH)
+            
+            val rectF = RectF(left, top, left + w.toFloat(), top + boxH)
+            canvas.drawRoundRect(rectF, 16f, 16f, bg) 
+            
+            canvas.save()
+            canvas.translate(left + pad, top + pad)
+            layout.draw(canvas)
+            canvas.restore()
+            
+            drawn.add(Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + boxH).toInt()))
+        }
     }
 }
 
