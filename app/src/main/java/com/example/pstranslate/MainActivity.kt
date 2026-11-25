@@ -9,7 +9,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -126,6 +128,20 @@ class MainActivity : ComponentActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
         root.addView(fontBar)
+
+        root.addView(label("\n\u0639\u0646\u0648\u0627\u0646 IP \u0644\u0644\u062a\u0644\u0641\u0627\u0632 (\u0627\u062e\u062a\u064a\u0627\u0631\u064a - \u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0625\u0644\u0649 \u0627\u0644\u062a\u0644\u0641\u0627\u0632):"))
+        val tvBox = EditText(this).apply {
+            hint = "192.168.1.xx"
+            setText(prefs.getString("tv_ip", ""))
+        }
+        tvBox.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                prefs.edit().putString("tv_ip", (s?.toString() ?: "").trim()).apply()
+            }
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        })
+        root.addView(tvBox)
 
         root.addView(Button(this).apply {
             text = "\u0627\u0628\u062f\u0623 \u0627\u0644\u062a\u0631\u062c\u0645\u0629"
