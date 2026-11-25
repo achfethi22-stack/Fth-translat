@@ -1,0 +1,16 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- ✅ استخدام ثيم Material 3 ليتوافق مع التصميم الجديد -->
+    <style name="Theme.PsTranslate" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- تخصيص الألوان الأساسية (يمكنك تغييرها لاحقاً) -->
+        <item name="colorPrimary">#6750A4</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#EADDFF</item>
+        <item name="colorOnPrimaryContainer">#21005D</item>
+        <item name="colorSecondary">#625B71</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondaryContainer">#E8DEF8</item>
+        <item name="colorOnSecondaryContainer">#1D192B</item>
+        <!-- لون الخلفية ليدعم الوضع الداكن -->
+        <item name="android:colorBackground">?attr/colorSurface</item>
+    </style>
+</resources>
