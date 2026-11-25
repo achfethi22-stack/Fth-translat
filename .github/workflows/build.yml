@@ -15,9 +15,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build phone APK
+        run: gradle :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: PSTranslate-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Build TV test APK
+        continue-on-error: true
+        run: gradle :tv:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PSTranslateTV-apk
+          path: tv/build/outputs/apk/debug/tv-debug.apk
+          if-no-files-found: ignore
