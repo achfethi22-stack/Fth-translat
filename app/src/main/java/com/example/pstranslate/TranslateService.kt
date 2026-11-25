@@ -231,7 +231,7 @@ class TranslateService : Service() {
         else full
         recognizer.process(InputImage.fromBitmap(bmp, 0))
             .addOnSuccessListener { r: Text ->
-                val blocks = r.textBlocks.filter { b -> b.boundingBox != null && b.text.length >= 3 }.take(15)
+                val blocks = r.textBlocks.filter { b -> b.boundingBox != null && b.text.length >= 3 }.take(30)
                 handleBlocks(blocks)
             }
             .addOnFailureListener { _: Exception -> busy = false }
@@ -244,11 +244,18 @@ class TranslateService : Service() {
             busy = false
             return
         }
-        val key = blocks.joinToString("|") { b -> b.text }
+        val groups = mergeBlocks(blocks)
+        if (groups.isEmpty()) {
+            overlay?.setItems(emptyList())
+            lastKey = ""
+            busy = false
+            return
+        }
+        val srcs = groups.map { g -> g.second }
+        val key = srcs.joinToString("|")
         if (key == lastKey) { busy = false; return }
 
-        val srcs = blocks.map { b -> b.text.replace("\n", " ") }
-        val rects = blocks.map { b -> up(b.boundingBox ?: Rect()) }
+        val rects = groups.map { g -> up(g.first) }
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
@@ -277,6 +284,55 @@ class TranslateService : Service() {
                 }
             }
         }
+    }
+
+    private fun mergeBlocks(blocks: List<Text.TextBlock>): List<Pair<Rect, String>> {
+        val lines = ArrayList<OcrLine>()
+        for (blk in blocks) {
+            val bb = blk.boundingBox ?: continue
+            val t = blk.text.replace("\n", " ").trim()
+            if (t.isEmpty()) continue
+            val found = lines.firstOrNull { ln ->
+                val a = ln.rect
+                val vOver = minOf(a.bottom, bb.bottom) - maxOf(a.top, bb.top)
+                val minH = minOf(ln.h, bb.height())
+                val hGap = maxOf(a.left, bb.left) - minOf(a.right, bb.right)
+                vOver >= minH * 0.5f && hGap <= maxOf(ln.h, bb.height()) * 2f
+            }
+            if (found == null) {
+                val ln = OcrLine(Rect(bb), bb.height())
+                ln.pieces.add(Pair(bb.left, t))
+                lines.add(ln)
+            } else {
+                found.rect.union(bb)
+                found.pieces.add(Pair(bb.left, t))
+                found.h = maxOf(found.h, bb.height())
+            }
+        }
+        lines.sortBy { ln -> ln.rect.top }
+
+        val out = ArrayList<Pair<Rect, String>>()
+        var lastH = 0
+        for (ln in lines) {
+            val b = ln.rect
+            val prev = if (out.isEmpty()) null else out[out.size - 1]
+            var merged = false
+            if (prev != null) {
+                val a = prev.first
+                val gap = b.top - a.bottom
+                val overlapW = minOf(a.right, b.right) - maxOf(a.left, b.left)
+                val minW = minOf(a.width(), b.width())
+                if (gap <= lastH * 0.8f && overlapW > minW * 0.3f) {
+                    val u = Rect(a)
+                    u.union(b)
+                    out[out.size - 1] = Pair(u, prev.second + " " + ln.text())
+                    merged = true
+                }
+            }
+            if (!merged) out.add(Pair(Rect(b), ln.text()))
+            lastH = ln.h
+        }
+        return out.take(10)
     }
 
     private fun handleError(err: String) {
@@ -506,4 +562,9 @@ class SelectView(context: Context, private val onDone: (Float, Float, Float, Flo
         invalidate()
         return true
     }
+}
+
+class OcrLine(var rect: Rect, var h: Int) {
+    val pieces = ArrayList<Pair<Int, String>>()
+    fun text(): String = pieces.sortedBy { p -> p.first }.joinToString(" ") { p -> p.second }
 }
