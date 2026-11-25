@@ -8,7 +8,6 @@ import android.text.TextDirectionHeuristics
 import android.text.TextPaint
 import android.view.View
 import kotlin.math.max
-import kotlin.math.min
 
 class OverlayView(context: Context) : View(context) {
     private var items: List<Pair<Rect, String>> = emptyList()
@@ -16,14 +15,13 @@ class OverlayView(context: Context) : View(context) {
     var fontSize = 44f
     var above = true
     
-    // خلفية النص (سوداء شفافة قليلاً لتسهيل القراءة)
     private val bg = Paint().apply { 
-        color = 0xCC000000.toInt() // 0xCC تعني شفافية بنسبة 80%
-        cornerRadius = 16f // حواف دائرية للمربع
+        color = 0xCC000000.toInt()
+        cornerRadius = 16f
     }
     private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { 
         color = Color.WHITE 
-        textAlign = Paint.Align.CENTER // محاذاة النص للمركز
+        textAlign = Paint.Align.CENTER
     }
 
     fun hasItems() = items.isNotEmpty()
@@ -36,38 +34,34 @@ class OverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
         for ((r, text) in items) {
-            val pad = 24 // زيادة الحواشي لتبدو أفضل
+            val pad = 24f // ✅ تحويل إلى Float
             tp.textSize = fontSize
             
-            // تحديد عرض المربع: نأخذ أكبر نص أو 60% من عرض الشاشة كحد أدنى
             val minW = (width * 0.6f).toInt()
-            val w = max(r.width() + pad * 2, minW).coerceAtMost(width - 32) // ترك هامش 16 بكسل من كل جانب
-            val innerW = w - pad * 2
+            val w = max(r.width() + (pad * 2).toInt(), minW).coerceAtMost(width - 32)
+            val innerW = w - (pad * 2).toInt()
             
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, innerW)
                 .setTextDirection(TextDirectionHeuristics.RTL)
-                .setAlignment(Layout.Alignment.ALIGN_CENTER) // ✅ محاذاة النص في المنتصف
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
                 
-            val boxH = layout.height + pad * 2
+            val boxH = layout.height + (pad * 2).toInt()
             
-            // حساب موقع المربع في منتصف الشاشة أفقياً
+            // ✅ ضمان أن كل القيم من نوع Float
             val left = (width - w) / 2f
-            
-            // حساب موقع المربع عمودياً (فوق أو تحت النص الأصلي)
-            var top = if (above) r.top - boxH - 12 else r.bottom + 12
-            if (above && top < 0) top = r.bottom + 12
+            var top = if (above) r.top - boxH - 12f else r.bottom + 12f
+            if (above && top < 0f) top = r.bottom + 12f
             top = top.coerceIn(0f, height - boxH.toFloat())
             
-            // رسم الخلفية
             canvas.drawRect(left, top, left + w, top + boxH, bg)
             
-            // رسم النص
             canvas.save()
             canvas.translate(left + pad, top + pad)
             layout.draw(canvas)
             canvas.restore()
             
+            // ✅ تحويل القيم إلى Int هنا فقط عند الحفظ في المصفوفة
             drawn.add(Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + boxH).toInt()))
         }
     }
