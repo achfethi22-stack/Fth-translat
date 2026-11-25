@@ -81,6 +81,9 @@ class TranslateService : Service() {
     private var lastKey = ""
     private var lastToast = 0L
     private var running = false
+    @Volatile private var frames = 0
+    private var emptyCount = 0
+    private var lastApi = 0L
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -101,11 +104,7 @@ class TranslateService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        tickMs = when (engine) {
-            0 -> 4000L
-            1 -> 800L
-            else -> 1000L
-        }
+        tickMs = if (engine == 1) 800L else 1000L
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -176,6 +175,7 @@ class TranslateService : Service() {
         @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(m)
         reader?.close()
         reader = ImageReader.newInstance(m.widthPixels, m.heightPixels, PixelFormat.RGBA_8888, 2)
+        reader!!.setOnImageAvailableListener({ _: ImageReader -> frames = frames + 1 }, handler)
         if (display == null) {
             display = projection!!.createVirtualDisplay(
                 "ps-translate", m.widthPixels, m.heightPixels, m.densityDpi,
@@ -197,12 +197,18 @@ class TranslateService : Service() {
         if (!busy && !selecting) {
             busy = true
             val ov = overlay
-            if (ov != null && ov.hasItems()) {
+            val cover = getSharedPreferences("prefs", MODE_PRIVATE).getInt("mode", 0) == 1
+            if (cover && ov != null && ov.hasItems()) {
                 ov.alpha = 0f
-                handler.postDelayed({ grab() }, 120)
+                waitForFrames(frames, System.currentTimeMillis())
             } else grab()
         }
         handler.postDelayed({ tick() }, tickMs)
+    }
+
+    private fun waitForFrames(start: Int, t0: Long) {
+        if (frames - start >= 2 || System.currentTimeMillis() - t0 > 350) grab()
+        else handler.postDelayed({ waitForFrames(start, t0) }, 20)
     }
 
     private fun up(r: Rect): Rect =
@@ -231,7 +237,19 @@ class TranslateService : Service() {
         else full
         recognizer.process(InputImage.fromBitmap(bmp, 0))
             .addOnSuccessListener { r: Text ->
-                val blocks = r.textBlocks.filter { b -> b.boundingBox != null && b.text.length >= 3 }.take(30)
+                val cover = prefs.getInt("mode", 0) == 1
+                val own = overlay?.drawn ?: ArrayList<Rect>()
+                val blocks = r.textBlocks.filter { b ->
+                    val bb = b.boundingBox
+                    if (bb == null || b.text.length < 3) {
+                        false
+                    } else if (cover) {
+                        true
+                    } else {
+                        val c = up(bb)
+                        !own.any { o -> o.contains(c.centerX(), c.centerY()) }
+                    }
+                }.take(30)
                 handleBlocks(blocks)
             }
             .addOnFailureListener { _: Exception -> busy = false }
@@ -239,11 +257,15 @@ class TranslateService : Service() {
 
     private fun handleBlocks(blocks: List<Text.TextBlock>) {
         if (blocks.isEmpty()) {
-            overlay?.setItems(emptyList())
-            lastKey = ""
+            emptyCount = emptyCount + 1
+            if (emptyCount >= 3) {
+                overlay?.setItems(emptyList())
+                lastKey = ""
+            }
             busy = false
             return
         }
+        emptyCount = 0
         val groups = mergeBlocks(blocks)
         if (groups.isEmpty()) {
             overlay?.setItems(emptyList())
@@ -252,7 +274,7 @@ class TranslateService : Service() {
             return
         }
         val srcs = groups.map { g -> g.second }
-        val key = srcs.joinToString("|")
+        val key = srcs.joinToString("|") { t -> t.lowercase().filter { c -> c.isLetterOrDigit() } }
         if (key == lastKey) { busy = false; return }
 
         val rects = groups.map { g -> up(g.first) }
@@ -263,6 +285,12 @@ class TranslateService : Service() {
             translateOffline(missing, srcs, rects, key)
             return
         }
+
+        if (engine == 0 && System.currentTimeMillis() - lastApi < 4000) {
+            busy = false
+            return
+        }
+        lastApi = System.currentTimeMillis()
 
         net.execute {
             var result: List<String>? = null
@@ -406,6 +434,9 @@ class TranslateService : Service() {
     private fun show(srcs: List<String>, rects: List<Rect>, key: String) {
         val list = ArrayList<Pair<Rect, String>>()
         for (i in srcs.indices) list.add(Pair(rects[i], cache[srcs[i]] ?: srcs[i]))
+        val p = getSharedPreferences("prefs", MODE_PRIVATE)
+        overlay?.fontSize = p.getInt("font", 44).toFloat()
+        overlay?.above = p.getInt("mode", 0) == 0
         overlay?.setItems(list)
         lastKey = key
         busy = false
