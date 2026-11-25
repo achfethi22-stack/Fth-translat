@@ -9,7 +9,8 @@
     <application
         android:label="PS Translate"
         android:icon="@android:drawable/ic_menu_camera"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.PsTranslate">  <!-- ✅ تم تعديل الثيم هنا -->
+        
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -22,4 +23,3 @@
             android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>
-
