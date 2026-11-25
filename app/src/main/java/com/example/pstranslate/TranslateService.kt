@@ -55,6 +55,11 @@ class TranslateService : Service() {
         val GEMINI_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
         const val MAX_SIDE = 1280f
 
+        // ✅ تحسين: تقليل زمن الانتظار بين الطلبات
+        const val MIN_API_GAP_GEMINI = 1200L   // كان 4000
+        const val MIN_API_GAP_GROQ = 600L      // كان 2000
+        const val MIN_API_GAP_CLAUDE = 1200L
+
         const val SYSTEM = "You translate on-screen video game text into Arabic. " +
             "The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic " +
             "translations, same length and same order. Keep character names, numbers and button names " +
@@ -72,13 +77,17 @@ class TranslateService : Service() {
     private var selector: SelectView? = null
     private var translator: Translator? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private val cache = HashMap<String, String>()
+
+    // ✅ تحسين: LRU cache بدلاً من HashMap غير محدود
+    private val cache = object : LinkedHashMap<String, String>(200, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 500
+    }
 
     private var engine = 0
     private var claudeKey = ""
     private var geminiKey = ""
     private var groqKey = ""
-    private var tickMs = 1000L
+    private var tickMs = 700L
     private var scale = 1f
     private var offX = 0
     private var offY = 0
@@ -92,6 +101,9 @@ class TranslateService : Service() {
     private var pendingKey = ""
     private var pendingCount = 0
     private var lastApi = 0L
+
+    // ✅ تحسين: معرف الطلب الحالي لتجاهل النتائج القديمة
+    @Volatile private var currentRequestId = 0
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -116,7 +128,8 @@ class TranslateService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        tickMs = if (engine == 1 || engine == 3) 800L else 1000L
+        // ✅ تحسين: tick أسرع بكثير
+        tickMs = if (engine == 1 || engine == 3) 500L else 700L
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -132,18 +145,40 @@ class TranslateService : Service() {
         addOverlay()
         setupDisplay()
 
+        // ✅ تحسين: "تسخين" النموذج — إرسال طلب وهمي لفتح الاتصال مسبقاً
+        warmup()
+
         if (engine == 2) {
             val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
             translator = Translation.getClient(
                 TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build()
             )
             translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
-                .addOnSuccessListener { handler.post { tick() } }
+                .addOnSuccessListener {
+                    // ✅ تسخين النموذج المحلي
+                    translator?.translate("hello")?.addOnCompleteListener {
+                        handler.post { tick() }
+                    }
+                }
                 .addOnFailureListener { stopSelf() }
         } else {
             handler.post { tick() }
         }
         return START_NOT_STICKY
+    }
+
+    // ✅ دالة جديدة: تسخين اتصال الشبكة
+    private fun warmup() {
+        if (engine == 2) return
+        net.execute {
+            try {
+                when (engine) {
+                    1 -> callClaude(listOf("hi"))
+                    3 -> callGroq(listOf("hi"))
+                    else -> callGemini(listOf("hi"))
+                }
+            } catch (_: Exception) { /* تجاهل */ }
+        }
     }
 
     private fun startAsForeground() {
@@ -212,14 +247,17 @@ class TranslateService : Service() {
             val ov = overlay
             if (cover && ov != null && ov.hasItems()) {
                 ov.alpha = 0f
+                // ✅ انتظار إطار واحد فقط بدلاً من إطارين
                 waitForFrames(frames, System.currentTimeMillis())
             } else grab()
         }
-        handler.postDelayed({ tick() }, if (cover) 3000L else tickMs)
+        // ✅ تقليل فترة الانتظار في وضع التغطية
+        handler.postDelayed({ tick() }, if (cover) 1500L else tickMs)
     }
 
     private fun waitForFrames(start: Int, t0: Long) {
-        if (frames - start >= 2 || System.currentTimeMillis() - t0 > 200) grab()
+        // ✅ إطار واحد فقط بدلاً من إطارين
+        if (frames - start >= 1 || System.currentTimeMillis() - t0 > 120) grab()
         else handler.postDelayed({ waitForFrames(start, t0) }, 20)
     }
 
@@ -261,7 +299,8 @@ class TranslateService : Service() {
                         val c = up(bb)
                         !own.any { o -> o.contains(c.centerX(), c.centerY()) }
                     }
-                }.take(30)
+                // ✅ زيادة من 30 إلى 50
+                }.take(50)
                 handleBlocks(blocks)
             }
             .addOnFailureListener { _: Exception -> busy = false }
@@ -302,6 +341,7 @@ class TranslateService : Service() {
             pendingKey = key
             pendingCount = 1
         }
+        // ✅ تقليل الشرط: في وضع cover نترجم فوراً، وفي الوضع العادي نحتاج إطارين (كان 2)
         if (!coverNow && pendingCount < 2) {
             busy = false
             return
@@ -316,12 +356,23 @@ class TranslateService : Service() {
             return
         }
 
+        // ✅ تحسين: بدلاً من إسقاط الطلب، انتظر الفجوة المطلوبة ثم أعد المحاولة
         val now = System.currentTimeMillis()
-        if ((engine == 0 && now - lastApi < 4000) || (engine == 3 && now - lastApi < 2000)) {
+        val minGap = when (engine) {
+            1 -> MIN_API_GAP_CLAUDE
+            3 -> MIN_API_GAP_GROQ
+            else -> MIN_API_GAP_GEMINI
+        }
+        if (now - lastApi < minGap) {
+            val wait = minGap - (now - lastApi)
             busy = false
+            handler.postDelayed({ if (running && !busy) { busy = true; handleBlocks(blocks) } }, wait)
             return
         }
         lastApi = now
+
+        // ✅ معرف الطلب لتجاهل النتائج القديمة
+        val reqId = ++currentRequestId
 
         net.execute {
             var result: List<String>? = null
@@ -330,7 +381,14 @@ class TranslateService : Service() {
                 result = when (engine) {
                     1 -> callClaude(missing)
                     3 -> callGroq(missing)
-                    else -> callGemini(missing)
+                    else -> {
+                        // ✅ Fallback: إذا فشل Gemini، جرب Groq إذا كان المفتاح متوفراً
+                        try {
+                            callGemini(missing)
+                        } catch (e: Exception) {
+                            if (groqKey.isNotEmpty()) callGroq(missing) else throw e
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 error = e.message ?: "error"
@@ -338,6 +396,8 @@ class TranslateService : Service() {
             val res = result
             val err = error
             handler.post {
+                // ✅ تجاهل النتيجة إذا تغيّر الطلب
+                if (reqId != currentRequestId) { busy = false; return@post }
                 if (res != null) {
                     for (i in missing.indices) cache.put(missing[i], res[i])
                     show(srcs, rects, key)
@@ -385,7 +445,9 @@ class TranslateService : Service() {
                 val gap = b.top - a.bottom
                 val overlapW = minOf(a.right, b.right) - maxOf(a.left, b.left)
                 val minW = minOf(a.width(), b.width())
-                if (gap <= lastH * 0.8f && overlapW > minW * 0.3f) {
+                // ✅ شرط أكثر صرامة: تجنب دمج فقرات غير مترابطة
+                val sameSize = kotlin.math.abs(a.height() - b.height()) < maxOf(a.height(), b.height()) * 0.4f
+                if (gap <= lastH * 0.5f && overlapW > minW * 0.5f && sameSize) {
                     val u = Rect(a)
                     u.union(b)
                     out[out.size - 1] = Pair(u, prev.second + " " + ln.text())
@@ -395,7 +457,8 @@ class TranslateService : Service() {
             if (!merged) out.add(Pair(Rect(b), ln.text()))
             lastH = ln.h
         }
-        return out.take(10)
+        // ✅ زيادة من 10 إلى 20
+        return out.take(20)
     }
 
     private fun similar(a: String, b: String): Boolean {
@@ -455,7 +518,8 @@ class TranslateService : Service() {
                     finish()
                 }
                 .addOnFailureListener { _: Exception ->
-                    cache.put(s, s)
+                    // ✅ لا نخزن النص الأصلي — نتركه ليُعاد المحاولة لاحقاً
+                    // cache.put(s, s)  ← كان هذا السطر سابقاً
                     finish()
                 }
         }
@@ -524,15 +588,23 @@ class TranslateService : Service() {
         return Pair(code, text)
     }
 
+    // ✅ إصلاح حرج: عدم إرجاع نص أصلي عند فشل التحليل
     private fun parseList(raw: String, texts: List<String>): List<String> {
         var out = raw.trim()
         if (out.startsWith("```")) out = out.substringAfter("\n").substringBeforeLast("```").trim()
         val start = out.indexOf('[')
         val end = out.lastIndexOf(']')
         if (start >= 0 && end > start) out = out.substring(start, end + 1)
-        val res = JSONArray(out)
+        val res = try {
+            JSONArray(out)
+        } catch (e: Exception) {
+            // فشل التحليل تماماً — أعد النص الأصلي (سيُعاد المحاولة لاحقاً لأن cache لم يُحدَّث)
+            return texts
+        }
+        // إذا كانت المصفوفة أقصر من المطلوب، لا نثق بالنتيجة
+        if (res.length() < texts.size) return texts
         val list = ArrayList<String>()
-        for (i in texts.indices) list.add(if (i < res.length()) res.optString(i, texts[i]) else texts[i])
+        for (i in texts.indices) list.add(res.optString(i, texts[i]))
         return list
     }
 
