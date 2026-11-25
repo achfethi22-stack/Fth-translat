@@ -120,7 +120,6 @@ class TranslateService : Service() {
         setupDisplay()
         warmup()
 
-        // ✅ تعديل رقم المحرك إلى 1
         if (engine == 1) {
             val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
             translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build())
@@ -134,7 +133,7 @@ class TranslateService : Service() {
     }
 
     private fun warmup() {
-        if (engine == 1) return // ✅ تعديل رقم المحرك إلى 1
+        if (engine == 1) return
         net.execute {
             try { callGemini(listOf("hi")) } catch (_: Exception) {}
         }
@@ -260,7 +259,6 @@ class TranslateService : Service() {
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
-        // ✅ تعديل رقم المحرك إلى 1
         if (engine == 1) { translateOffline(missing, srcs, rects, key); return }
 
         val now = System.currentTimeMillis()
@@ -493,28 +491,32 @@ class OverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
         for ((r, text) in items) {
-            val pad = 24f // Float
+            // ✅ تحويل كل القيم إلى Float لتفادي أي التباس
+            val pad = 24f
             tp.textSize = fontSize
             
-            val minW = (width * 0.6f).toInt()
-            val w = max(r.width() + (pad * 2).toInt(), minW).coerceAtMost(width - 32)
-            val innerW = w - (pad * 2).toInt()
+            val rWidth = r.width().toFloat()
+            val minWF = width * 0.6f
+            val maxWF = (width - 32).toFloat()
+            
+            val wF = max(rWidth + (pad * 2f), minWF).coerceAtMost(maxWF)
+            val w = wF.toInt()
+            val innerW = w - (pad * 2f).toInt()
             
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, innerW)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
                 
-            // ✅ تحويل كافة القيم إلى Float لتفادي الخطأ
             val layoutH = layout.height.toFloat()
-            val boxH = layoutH + (pad * 2)
+            val boxH = layoutH + (pad * 2f)
             
-            val left = (width - w) / 2f
+            val left = (width.toFloat() - wF) / 2f
             var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
             if (above && top < 0f) top = r.bottom.toFloat() + 12f
             top = top.coerceIn(0f, height.toFloat() - boxH)
             
-            val rectF = RectF(left, top, left + w.toFloat(), top + boxH)
+            val rectF = RectF(left, top, left + wF, top + boxH)
             canvas.drawRoundRect(rectF, 16f, 16f, bg) 
             
             canvas.save()
@@ -522,7 +524,7 @@ class OverlayView(context: Context) : View(context) {
             layout.draw(canvas)
             canvas.restore()
             
-            drawn.add(Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + boxH).toInt()))
+            drawn.add(Rect(left.toInt(), top.toInt(), (left + wF).toInt(), (top + boxH).toInt()))
         }
     }
 }
