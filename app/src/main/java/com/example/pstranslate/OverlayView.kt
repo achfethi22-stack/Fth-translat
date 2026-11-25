@@ -1,21 +1,9 @@
-package com.example.pstranslate
-
-import android.content.Context
-import android.graphics.*
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextDirectionHeuristics
-import android.text.TextPaint
-import android.view.View
-import kotlin.math.max
-
 class OverlayView(context: Context) : View(context) {
     private var items: List<Pair<Rect, String>> = emptyList()
     val drawn = ArrayList<Rect>()
     var fontSize = 44f
     var above = true
     
-    // ✅ إزالة cornerRadius من Paint
     private val bg = Paint().apply { 
         color = 0xCC000000.toInt()
     }
@@ -35,26 +23,32 @@ class OverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
         for ((r, text) in items) {
+            // ✅ تحويل كل القيم إلى Float لتفادي أي التباس
             val pad = 24f
             tp.textSize = fontSize
             
-            val minW = (width * 0.6f).toInt()
-            val w = max(r.width() + (pad * 2).toInt(), minW).coerceAtMost(width - 32)
-            val innerW = w - (pad * 2).toInt()
+            val rWidth = r.width().toFloat()
+            val minWF = width * 0.6f
+            val maxWF = (width - 32).toFloat()
+            
+            val wF = max(rWidth + (pad * 2f), minWF).coerceAtMost(maxWF)
+            val w = wF.toInt()
+            val innerW = w - (pad * 2f).toInt()
             
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, innerW)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
                 
-            val boxH = layout.height.toFloat() + (pad * 2)
-            val left = (width - w) / 2f
+            val layoutH = layout.height.toFloat()
+            val boxH = layoutH + (pad * 2f)
+            
+            val left = (width.toFloat() - wF) / 2f
             var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
             if (above && top < 0f) top = r.bottom.toFloat() + 12f
             top = top.coerceIn(0f, height.toFloat() - boxH)
             
-            // ✅ رسم مستطيل بحواف دائرية
-            val rectF = RectF(left, top, left + w.toFloat(), top + boxH)
+            val rectF = RectF(left, top, left + wF, top + boxH)
             canvas.drawRoundRect(rectF, 16f, 16f, bg) 
             
             canvas.save()
@@ -62,7 +56,7 @@ class OverlayView(context: Context) : View(context) {
             layout.draw(canvas)
             canvas.restore()
             
-            drawn.add(Rect(left.toInt(), top.toInt(), (left + w).toInt(), (top + boxH).toInt()))
+            drawn.add(Rect(left.toInt(), top.toInt(), (left + wF).toInt(), (top + boxH).toInt()))
         }
     }
 }
