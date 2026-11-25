@@ -41,11 +41,8 @@ class OverlayView(context: Context) : View(context) {
             val pad = 24f 
             tp.textSize = fontSize
             
-            val rWidth = r.width().toFloat()
-            val minWF = width * 0.6f
-            val maxWF = (width - 32).toFloat()
-            
-            val wF = max(rWidth + (pad * 2f), minWF).coerceAtMost(maxWF)
+            // ✅ جعل المربع يأخذ 90% من عرض الشاشة دائماً (ليتسع للجمل الطويلة)
+            val wF = width * 0.90f
             val w = wF.toInt()
             val innerW = w - (pad * 2f).toInt()
             
@@ -57,14 +54,19 @@ class OverlayView(context: Context) : View(context) {
             val layoutH = layout.height.toFloat()
             val boxH = layoutH + (pad * 2f)
             
+            // ✅ تثبيت المربع في منتصف الشاشة تماماً أفقياً
             val left = (width.toFloat() - wF) / 2f
+            
+            // تحديد الموقع العمودي (فوق أو تحت النص الأصلي)
             var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
             if (above && top < 0f) top = r.bottom.toFloat() + 12f
             top = top.coerceIn(0f, height.toFloat() - boxH)
             
+            // رسم الخلفية
             val rectF = RectF(left, top, left + wF, top + boxH)
             canvas.drawRoundRect(rectF, 16f, 16f, bg) 
             
+            // رسم النص
             canvas.save()
             canvas.translate(left + pad, top + pad)
             layout.draw(canvas)
