@@ -51,6 +51,7 @@ class TranslateService : Service() {
         @Volatile var isRunning = false
 
         const val CLAUDE_MODEL = "claude-haiku-5-5"
+        const val GROQ_MODEL = "llama-3.3-70b-versatile"
         val GEMINI_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
         const val MAX_SIDE = 1280f
 
@@ -76,6 +77,7 @@ class TranslateService : Service() {
     private var engine = 0
     private var claudeKey = ""
     private var geminiKey = ""
+    private var groqKey = ""
     private var tickMs = 1000L
     private var scale = 1f
     private var offX = 0
@@ -105,12 +107,16 @@ class TranslateService : Service() {
         engine = prefs.getInt("engine", 0)
         claudeKey = prefs.getString("api_key", "") ?: ""
         geminiKey = prefs.getString("gemini_key", "") ?: ""
+        groqKey = prefs.getString("groq_key", "") ?: ""
         val lang = prefs.getString("lang", "en") ?: "en"
-        if ((engine == 0 && geminiKey.isEmpty()) || (engine == 1 && claudeKey.isEmpty())) {
+        if ((engine == 0 && geminiKey.isEmpty()) ||
+            (engine == 1 && claudeKey.isEmpty()) ||
+            (engine == 3 && groqKey.isEmpty())
+        ) {
             stopSelf()
             return START_NOT_STICKY
         }
-        tickMs = if (engine == 1) 800L else 1000L
+        tickMs = if (engine == 1 || engine == 3) 800L else 1000L
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -153,9 +159,9 @@ class TranslateService : Service() {
         )
         val n = Notification.Builder(this, "ps")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("\u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u062a\u0639\u0645\u0644")
-            .addAction(Notification.Action.Builder(null, "\u062a\u062d\u062f\u064a\u062f \u0627\u0644\u0645\u0646\u0637\u0642\u0629", sel).build())
-            .addAction(Notification.Action.Builder(null, "\u0625\u064a\u0642\u0627\u0641", stop).build())
+            .setContentTitle("الترجمة تعمل")
+            .addAction(Notification.Action.Builder(null, "تحديد المنطقة", sel).build())
+            .addAction(Notification.Action.Builder(null, "إيقاف", stop).build())
             .build()
         if (Build.VERSION.SDK_INT >= 29)
             startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -310,17 +316,22 @@ class TranslateService : Service() {
             return
         }
 
-        if (engine == 0 && System.currentTimeMillis() - lastApi < 4000) {
+        val now = System.currentTimeMillis()
+        if ((engine == 0 && now - lastApi < 4000) || (engine == 3 && now - lastApi < 2000)) {
             busy = false
             return
         }
-        lastApi = System.currentTimeMillis()
+        lastApi = now
 
         net.execute {
             var result: List<String>? = null
             var error: String? = null
             try {
-                result = if (engine == 1) callClaude(missing) else callGemini(missing)
+                result = when (engine) {
+                    1 -> callClaude(missing)
+                    3 -> callGroq(missing)
+                    else -> callGemini(missing)
+                }
             } catch (e: Exception) {
                 error = e.message ?: "error"
             }
@@ -411,7 +422,7 @@ class TranslateService : Service() {
                 sock.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 8765))
                 sock.close()
             } catch (e: Exception) {
-                // \u062a\u062c\u0627\u0647\u0644 \u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0634\u0628\u0643\u0629
+                // تجاهل أخطاء الشبكة
             }
         }
     }
@@ -420,13 +431,13 @@ class TranslateService : Service() {
         val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") ||
             err.contains("API_KEY_INVALID") || err.contains("API key not valid")
         if (keyError) {
-            Toast.makeText(this, "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u063a\u064a\u0631 \u0635\u062d\u064a\u062d", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "المفتاح غير صحيح", Toast.LENGTH_LONG).show()
             stopSelf()
             return
         }
         if (System.currentTimeMillis() - lastToast > 10000) {
             lastToast = System.currentTimeMillis()
-            val msg = if (err.contains("HTTP 429")) "\u062a\u062c\u0627\u0648\u0632\u062a \u0627\u0644\u062d\u062f \u0627\u0644\u0645\u062c\u0627\u0646\u064a\u060c \u0633\u0623\u062d\u0627\u0648\u0644 \u0628\u0639\u062f \u0642\u0644\u064a\u0644" else "\u062a\u0639\u0630\u0631\u062a \u0627\u0644\u062a\u0631\u062c\u0645\u0629: " + err.take(60)
+            val msg = if (err.contains("HTTP 429")) "تجاوزت الحد المجاني، سأحاول بعد قليل" else "تعذرت الترجمة: " + err.take(60)
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
     }
@@ -463,7 +474,7 @@ class TranslateService : Service() {
             removeSelector()
             overlay?.setItems(emptyList())
             lastKey = ""
-            Toast.makeText(this, "\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u0645\u0646\u0637\u0642\u0629", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "تم حفظ المنطقة", Toast.LENGTH_SHORT).show()
         }
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
@@ -516,6 +527,9 @@ class TranslateService : Service() {
     private fun parseList(raw: String, texts: List<String>): List<String> {
         var out = raw.trim()
         if (out.startsWith("```")) out = out.substringAfter("\n").substringBeforeLast("```").trim()
+        val start = out.indexOf('[')
+        val end = out.lastIndexOf(']')
+        if (start >= 0 && end > start) out = out.substring(start, end + 1)
         val res = JSONArray(out)
         val list = ArrayList<String>()
         for (i in texts.indices) list.add(if (i < res.length()) res.optString(i, texts[i]) else texts[i])
@@ -534,6 +548,28 @@ class TranslateService : Service() {
         val r = httpPost("https://api.anthropic.com/v1/messages", headers, body.toString())
         if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
         val raw = JSONObject(r.second).getJSONArray("content").getJSONObject(0).getString("text")
+        return parseList(raw, texts)
+    }
+
+    private fun callGroq(texts: List<String>): List<String> {
+        val arr = JSONArray()
+        for (t in texts) arr.put(t)
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", SYSTEM))
+            .put(JSONObject().put("role", "user").put("content", arr.toString()))
+        val body = JSONObject()
+            .put("model", GROQ_MODEL)
+            .put("temperature", 0.2)
+            .put("max_tokens", 1500)
+            .put("messages", messages)
+        val headers = mapOf("Authorization" to "Bearer $groqKey")
+        val r = httpPost("https://api.groq.com/openai/v1/chat/completions", headers, body.toString())
+        if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
+        val raw = JSONObject(r.second)
+            .getJSONArray("choices")
+            .getJSONObject(0)
+            .getJSONObject("message")
+            .getString("content")
         return parseList(raw, texts)
     }
 
@@ -616,8 +652,8 @@ class SelectView(context: Context, private val onDone: (Float, Float, Float, Flo
             canvas.drawRect(l, t, r, b, fill)
             canvas.drawRect(l, t, r, b, line)
         }
-        canvas.drawText("\u0627\u0633\u062d\u0628 \u0628\u0625\u0635\u0628\u0639\u0643 \u0644\u062a\u062d\u062f\u064a\u062f \u0645\u0646\u0637\u0642\u0629 \u0627\u0644\u062d\u0648\u0627\u0631", width / 2f, 130f, txt)
-        canvas.drawText("\u0627\u0644\u0645\u0633 \u0628\u062f\u0648\u0646 \u0633\u062d\u0628 \u0644\u062a\u0631\u062c\u0645\u0629 \u0627\u0644\u0634\u0627\u0634\u0629 \u0643\u0644\u0647\u0627", width / 2f, 200f, txt)
+        canvas.drawText("اسحب بإصبعك لتحديد منطقة الحوار", width / 2f, 130f, txt)
+        canvas.drawText("المس بدون سحب لترجمة الشاشة كلها", width / 2f, 200f, txt)
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
