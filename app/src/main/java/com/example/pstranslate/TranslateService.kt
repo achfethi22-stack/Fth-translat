@@ -15,6 +15,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
+import android.text.TextPaint
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.MotionEvent
@@ -39,7 +43,7 @@ class TranslateService : Service() {
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
 
-        // ✅ تحديث نماذج Gemini لتجنب خطأ 404
+        // ✅ تحديث نماذج Gemini
         val GEMINI_MODELS = listOf("gemini-3.8-flash", "gemini-3.6-flash")
         const val MAX_SIDE = 1280f
         const val MIN_API_GAP_GEMINI = 1200L
@@ -116,7 +120,7 @@ class TranslateService : Service() {
         setupDisplay()
         warmup()
 
-        // ✅ تم تعديل الرقم إلى 1 (بدون إنترنت)
+        // ✅ تعديل رقم المحرك إلى 1
         if (engine == 1) {
             val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
             translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build())
@@ -130,7 +134,7 @@ class TranslateService : Service() {
     }
 
     private fun warmup() {
-        if (engine == 1) return // ✅ تم تعديل الرقم إلى 1
+        if (engine == 1) return // ✅ تعديل رقم المحرك إلى 1
         net.execute {
             try { callGemini(listOf("hi")) } catch (_: Exception) {}
         }
@@ -256,7 +260,7 @@ class TranslateService : Service() {
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
-        // ✅ تم تعديل الرقم إلى 1 (بدون إنترنت)
+        // ✅ تعديل رقم المحرك إلى 1
         if (engine == 1) { translateOffline(missing, srcs, rects, key); return }
 
         val now = System.currentTimeMillis()
@@ -463,7 +467,7 @@ class TranslateService : Service() {
     }
 }
 
-// ✅ تم إصلاح كلاس OverlayView ليعرض النص في المنتصف
+// ✅ كلاس OverlayView بعد إصلاح الأنواع (Int/Float) والنص في المنتصف
 class OverlayView(context: Context) : View(context) {
     private var items: List<Pair<Rect, String>> = emptyList()
     val drawn = ArrayList<Rect>()
@@ -489,7 +493,7 @@ class OverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
         for ((r, text) in items) {
-            val pad = 24f
+            val pad = 24f // Float
             tp.textSize = fontSize
             
             val minW = (width * 0.6f).toInt()
@@ -501,7 +505,10 @@ class OverlayView(context: Context) : View(context) {
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
                 
-            val boxH = layout.height.toFloat() + (pad * 2)
+            // ✅ تحويل كافة القيم إلى Float لتفادي الخطأ
+            val layoutH = layout.height.toFloat()
+            val boxH = layoutH + (pad * 2)
+            
             val left = (width - w) / 2f
             var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
             if (above && top < 0f) top = r.bottom.toFloat() + 12f
