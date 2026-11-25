@@ -38,14 +38,10 @@ class TranslateService : Service() {
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
 
-        // ✅ تصحيح أسماء النماذج
-        const val CLAUDE_MODEL = "claude-3-5-haiku-20241022"
-        const val GROQ_MODEL = "llama-3.1-8b-instant" 
-        val GEMINI_MODELS = listOf("gemini-1.5-flash", "gemini-1.5-pro")
+        // ✅ الاحتفاظ فقط بـ Gemini
+        val GEMINI_MODELS = listOf("gemini-2.0-flash", "gemini-1.5-flash-latest") 
         const val MAX_SIDE = 1280f
         const val MIN_API_GAP_GEMINI = 1200L
-        const val MIN_API_GAP_GROQ = 600L
-        const val MIN_API_GAP_CLAUDE = 1200L
 
         const val SYSTEM = "You translate on-screen video game text into Arabic. The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic translations, same length and same order. Keep character names, numbers and button names (X, O, L1, R2...) unchanged. Be short and natural. No explanations, no code fences."
     }
@@ -67,9 +63,7 @@ class TranslateService : Service() {
     }
 
     private var engine = 0
-    private var claudeKey = ""
     private var geminiKey = ""
-    private var groqKey = ""
     private var tickMs = 700L
     private var scale = 1f
     private var offX = 0
@@ -98,15 +92,14 @@ class TranslateService : Service() {
 
         val prefs = getSharedPreferences("prefs", MODE_PRIVATE)
         engine = prefs.getInt("engine", 0)
-        claudeKey = (prefs.getString("api_key", "") ?: "").trim()
         geminiKey = (prefs.getString("gemini_key", "") ?: "").trim()
-        groqKey = (prefs.getString("groq_key", "") ?: "").trim()
         val lang = prefs.getString("lang", "en") ?: "en"
         
-        if ((engine == 0 && geminiKey.isEmpty()) || (engine == 1 && claudeKey.isEmpty()) || (engine == 3 && groqKey.isEmpty())) {
+        // إذا اختار Gemini ولم يكن المفتاح موجوداً، يتوقف
+        if (engine == 0 && geminiKey.isEmpty()) {
             stopSelf(); return START_NOT_STICKY
         }
-        tickMs = if (engine == 1 || engine == 3) 500L else 700L
+        tickMs = 700L
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -138,13 +131,7 @@ class TranslateService : Service() {
     private fun warmup() {
         if (engine == 2) return
         net.execute {
-            try {
-                when (engine) {
-                    1 -> callClaude(listOf("hi"))
-                    3 -> callGroq(listOf("hi"))
-                    else -> callGemini(listOf("hi"))
-                }
-            } catch (_: Exception) {}
+            try { callGemini(listOf("hi")) } catch (_: Exception) {}
         }
     }
 
@@ -271,9 +258,8 @@ class TranslateService : Service() {
         if (engine == 2) { translateOffline(missing, srcs, rects, key); return }
 
         val now = System.currentTimeMillis()
-        val minGap = when (engine) { 1 -> MIN_API_GAP_CLAUDE; 3 -> MIN_API_GAP_GROQ; else -> MIN_API_GAP_GEMINI }
-        if (now - lastApi < minGap) {
-            val wait = minGap - (now - lastApi)
+        if (now - lastApi < MIN_API_GAP_GEMINI) {
+            val wait = MIN_API_GAP_GEMINI - (now - lastApi)
             busy = false
             handler.postDelayed({ if (running && !busy) { busy = true; handleBlocks(blocks) } }, wait)
             return
@@ -285,11 +271,7 @@ class TranslateService : Service() {
             var result: List<String>? = null
             var error: String? = null
             try {
-                result = when (engine) {
-                    1 -> callClaude(missing)
-                    3 -> callGroq(missing)
-                    else -> try { callGemini(missing) } catch (e: Exception) { if (groqKey.isNotEmpty()) callGroq(missing) else throw e }
-                }
+                result = callGemini(missing)
             } catch (e: Exception) { error = e.message ?: "error" }
             
             handler.post {
@@ -445,26 +427,6 @@ class TranslateService : Service() {
         return list
     }
 
-    private fun callClaude(texts: List<String>): List<String> {
-        val arr = JSONArray(); for (t in texts) arr.put(t)
-        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", 1500).put("system", SYSTEM)
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", arr.toString())))
-        val headers = mapOf("x-api-key" to claudeKey, "anthropic-version" to "2023-06-01")
-        val r = httpPost("https://api.anthropic.com/v1/messages", headers, body.toString())
-        if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
-        return parseList(JSONObject(r.second).getJSONArray("content").getJSONObject(0).getString("text"), texts)
-    }
-
-    private fun callGroq(texts: List<String>): List<String> {
-        val arr = JSONArray(); for (t in texts) arr.put(t)
-        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM)).put(JSONObject().put("role", "user").put("content", arr.toString()))
-        val body = JSONObject().put("model", GROQ_MODEL).put("temperature", 0.2).put("max_tokens", 1500).put("messages", messages)
-        val headers = mapOf("Authorization" to "Bearer $groqKey")
-        val r = httpPost("https://api.groq.com/openai/v1/chat/completions", headers, body.toString())
-        if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
-        return parseList(JSONObject(r.second).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content"), texts)
-    }
-
     private fun callGemini(texts: List<String>): List<String> {
         val arr = JSONArray(); for (t in texts) arr.put(t)
         val body = JSONObject()
@@ -532,7 +494,6 @@ class SelectView(context: Context, private val onDone: (Float, Float, Float, Flo
     }
 }
 
-// ✅ كلاس OcrLine موجود هنا في النهاية لحل مشكلة البناء
 class OcrLine(var rect: Rect, var h: Int) {
     val pieces = ArrayList<Pair<Int, String>>()
     fun text(): String = pieces.sortedBy { p -> p.first }.joinToString(" ") { p -> p.second }
