@@ -24,17 +24,17 @@ class MainActivity : ComponentActivity() {
         "en" to "English", "fr" to "Français", "es" to "Español",
         "de" to "Deutsch", "it" to "Italiano", "pt" to "Português", "tr" to "Türkçe"
     )
+    
+    // ✅ حذف Claude و Groq من القائمة
     private val engines = listOf(
         "Gemini (مجاني - ذكاء اصطناعي)",
-        "Claude (مدفوع - الأدق)",
-        "بدون إنترنت (مجاني - أبسط)",
-        "Groq (مجاني - سريع جداً)"
+        "بدون إنترنت (مجاني - أبسط)"
     )
+    
     private lateinit var engineSpinner: Spinner
     private lateinit var langSpinner: Spinner
-    private lateinit var claudeBox: EditText
     private lateinit var geminiBox: EditText
-    private lateinit var groqBox: EditText
+    
     private val modes = listOf(
         "فوق النص الأصلي (ثابتة بدون وميض)",
         "تغطية النص الأصلي (قد تومض)"
@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
         root.addView(label("\nمحرك الترجمة:"))
         engineSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, engines)
+            // ضمان عدم تجاوز الحدود في حال كان المحفوظ سابقاً 2 أو 3
             setSelection(prefs.getInt("engine", 0).coerceIn(0, engines.lastIndex))
         }
         root.addView(engineSpinner)
@@ -88,13 +89,7 @@ class MainActivity : ComponentActivity() {
         geminiBox = keyBox("AIza...", prefs.getString("gemini_key", ""))
         root.addView(geminiBox)
 
-        root.addView(label("\nمفتاح Groq (من console.groq.com):"))
-        groqBox = keyBox("gsk_...", prefs.getString("groq_key", ""))
-        root.addView(groqBox)
-
-        root.addView(label("\nمفتاح Claude (من console.anthropic.com):"))
-        claudeBox = keyBox("sk-ant-...", prefs.getString("api_key", ""))
-        root.addView(claudeBox)
+        // ✅ حذف حقول Groq و Claude
 
         root.addView(label("\nلغة اللعبة (تُستخدم في وضع بدون إنترنت فقط):"))
         langSpinner = Spinner(this).apply {
@@ -188,25 +183,16 @@ class MainActivity : ComponentActivity() {
     private fun start() {
         val engine = engineSpinner.selectedItemPosition
         val gemini = geminiBox.text.toString().trim()
-        val claude = claudeBox.text.toString().trim()
-        val groq = groqBox.text.toString().trim()
+        
+        // ✅ التحقق فقط من مفتاح Gemini إذا تم اختياره
         if (engine == 0 && gemini.isEmpty()) {
             Toast.makeText(this, "أدخل مفتاح Gemini أولاً", Toast.LENGTH_LONG).show()
             return
         }
-        if (engine == 1 && claude.isEmpty()) {
-            Toast.makeText(this, "أدخل مفتاح Claude أولاً", Toast.LENGTH_LONG).show()
-            return
-        }
-        if (engine == 3 && groq.isEmpty()) {
-            Toast.makeText(this, "أدخل مفتاح Groq أولاً", Toast.LENGTH_LONG).show()
-            return
-        }
+        
         getSharedPreferences("prefs", MODE_PRIVATE).edit()
             .putInt("engine", engine)
             .putString("gemini_key", gemini)
-            .putString("api_key", claude)
-            .putString("groq_key", groq)
             .putString("lang", langs[langSpinner.selectedItemPosition].first)
             .apply()
 
