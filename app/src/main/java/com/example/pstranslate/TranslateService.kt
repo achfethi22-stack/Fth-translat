@@ -36,7 +36,10 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.URL
 import java.util.concurrent.Executors
 
@@ -59,6 +62,7 @@ class TranslateService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val net = Executors.newSingleThreadExecutor()
+    private val udp = Executors.newSingleThreadExecutor()
     private lateinit var wm: WindowManager
     private var projection: MediaProjection? = null
     private var reader: ImageReader? = null
@@ -83,6 +87,8 @@ class TranslateService : Service() {
     private var running = false
     @Volatile private var frames = 0
     private var emptyCount = 0
+    private var pendingKey = ""
+    private var pendingCount = 0
     private var lastApi = 0L
 
     override fun onBind(i: Intent?): IBinder? = null
@@ -194,20 +200,20 @@ class TranslateService : Service() {
 
     private fun tick() {
         if (!running) return
+        val cover = getSharedPreferences("prefs", MODE_PRIVATE).getInt("mode", 0) == 1
         if (!busy && !selecting) {
             busy = true
             val ov = overlay
-            val cover = getSharedPreferences("prefs", MODE_PRIVATE).getInt("mode", 0) == 1
             if (cover && ov != null && ov.hasItems()) {
                 ov.alpha = 0f
                 waitForFrames(frames, System.currentTimeMillis())
             } else grab()
         }
-        handler.postDelayed({ tick() }, tickMs)
+        handler.postDelayed({ tick() }, if (cover) 3000L else tickMs)
     }
 
     private fun waitForFrames(start: Int, t0: Long) {
-        if (frames - start >= 2 || System.currentTimeMillis() - t0 > 350) grab()
+        if (frames - start >= 2 || System.currentTimeMillis() - t0 > 200) grab()
         else handler.postDelayed({ waitForFrames(start, t0) }, 20)
     }
 
@@ -258,8 +264,9 @@ class TranslateService : Service() {
     private fun handleBlocks(blocks: List<Text.TextBlock>) {
         if (blocks.isEmpty()) {
             emptyCount = emptyCount + 1
-            if (emptyCount >= 3) {
+            if (emptyCount >= 4) {
                 overlay?.setItems(emptyList())
+                sendToTv(emptyList())
                 lastKey = ""
             }
             busy = false
@@ -269,13 +276,30 @@ class TranslateService : Service() {
         val groups = mergeBlocks(blocks)
         if (groups.isEmpty()) {
             overlay?.setItems(emptyList())
+            sendToTv(emptyList())
             lastKey = ""
             busy = false
             return
         }
         val srcs = groups.map { g -> g.second }
         val key = srcs.joinToString("|") { t -> t.lowercase().filter { c -> c.isLetterOrDigit() } }
-        if (key == lastKey) { busy = false; return }
+        val coverNow = getSharedPreferences("prefs", MODE_PRIVATE).getInt("mode", 0) == 1
+        if (similar(key, lastKey)) {
+            pendingKey = ""
+            pendingCount = 0
+            busy = false
+            return
+        }
+        if (similar(key, pendingKey)) {
+            pendingCount = pendingCount + 1
+        } else {
+            pendingKey = key
+            pendingCount = 1
+        }
+        if (!coverNow && pendingCount < 2) {
+            busy = false
+            return
+        }
 
         val rects = groups.map { g -> up(g.first) }
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
@@ -363,6 +387,35 @@ class TranslateService : Service() {
         return out.take(10)
     }
 
+    private fun similar(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (a.length < 6 || b.length < 6) return false
+        val ga = HashSet<String>()
+        for (i in 0..a.length - 3) ga.add(a.substring(i, i + 3))
+        val gb = HashSet<String>()
+        for (i in 0..b.length - 3) gb.add(b.substring(i, i + 3))
+        var inter = 0
+        for (x in ga) if (gb.contains(x)) inter = inter + 1
+        val union = ga.size + gb.size - inter
+        return union > 0 && inter.toFloat() / union.toFloat() >= 0.8f
+    }
+
+    private fun sendToTv(texts: List<String>) {
+        val ip = (getSharedPreferences("prefs", MODE_PRIVATE).getString("tv_ip", "") ?: "").trim()
+        if (ip.isEmpty()) return
+        val msg = texts.joinToString("\n").take(500)
+        udp.execute {
+            try {
+                val bytes = msg.toByteArray(Charsets.UTF_8)
+                val sock = DatagramSocket()
+                sock.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 8765))
+                sock.close()
+            } catch (e: Exception) {
+                // \u062a\u062c\u0627\u0647\u0644 \u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0634\u0628\u0643\u0629
+            }
+        }
+    }
+
     private fun handleError(err: String) {
         val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") ||
             err.contains("API_KEY_INVALID") || err.contains("API key not valid")
@@ -438,7 +491,10 @@ class TranslateService : Service() {
         overlay?.fontSize = p.getInt("font", 44).toFloat()
         overlay?.above = p.getInt("mode", 0) == 0
         overlay?.setItems(list)
+        sendToTv(list.map { p -> p.second })
         lastKey = key
+        pendingKey = ""
+        pendingCount = 0
         busy = false
     }
 
@@ -517,6 +573,7 @@ class TranslateService : Service() {
         isRunning = false
         handler.removeCallbacksAndMessages(null)
         net.shutdownNow()
+        udp.shutdownNow()
         if (::wm.isInitialized) {
             removeSelector()
             overlay?.let { v -> runCatching { wm.removeView(v) } }
