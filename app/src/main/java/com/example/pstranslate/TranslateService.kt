@@ -1,9 +1,9 @@
 package com.example.pstranslate
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -25,6 +25,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.TranslatorOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -41,9 +46,15 @@ class TranslateService : Service() {
         const val ACTION_STOP = "stop"
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
-        const val MODEL = "claude-haiku-5-5"
+
+        const val CLAUDE_MODEL = "claude-haiku-5-5"
+        val GEMINI_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
         const val MAX_SIDE = 1280f
-        const val TICK_MS = 800L
+
+        const val SYSTEM = "You translate on-screen video game text into Arabic. " +
+            "The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic " +
+            "translations, same length and same order. Keep character names, numbers and button names " +
+            "(X, O, L1, R2...) unchanged. Be short and natural. No explanations, no code fences."
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -53,18 +64,23 @@ class TranslateService : Service() {
     private var reader: ImageReader? = null
     private var display: VirtualDisplay? = null
     private var overlay: OverlayView? = null
+    private var selector: SelectView? = null
+    private var translator: Translator? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val cache = HashMap<String, String>()
-    private var apiKey = ""
+
+    private var engine = 0
+    private var claudeKey = ""
+    private var geminiKey = ""
+    private var tickMs = 1000L
     private var scale = 1f
+    private var offX = 0
+    private var offY = 0
     private var busy = false
+    private var selecting = false
     private var lastKey = ""
     private var lastToast = 0L
     private var running = false
-    private var selector: SelectView? = null
-    private var selecting = false
-    private var offX = 0
-    private var offY = 0
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -76,8 +92,20 @@ class TranslateService : Service() {
         isRunning = true
         startAsForeground()
 
-        apiKey = getSharedPreferences("prefs", MODE_PRIVATE).getString("api_key", "") ?: ""
-        if (apiKey.isEmpty()) { stopSelf(); return START_NOT_STICKY }
+        val prefs = getSharedPreferences("prefs", MODE_PRIVATE)
+        engine = prefs.getInt("engine", 0)
+        claudeKey = prefs.getString("api_key", "") ?: ""
+        geminiKey = prefs.getString("gemini_key", "") ?: ""
+        val lang = prefs.getString("lang", "en") ?: "en"
+        if ((engine == 0 && geminiKey.isEmpty()) || (engine == 1 && claudeKey.isEmpty())) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        tickMs = when (engine) {
+            0 -> 4000L
+            1 -> 800L
+            else -> 1000L
+        }
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -92,7 +120,18 @@ class TranslateService : Service() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         addOverlay()
         setupDisplay()
-        handler.post { tick() }
+
+        if (engine == 2) {
+            val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
+            translator = Translation.getClient(
+                TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build()
+            )
+            translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
+                .addOnSuccessListener { handler.post { tick() } }
+                .addOnFailureListener { stopSelf() }
+        } else {
+            handler.post { tick() }
+        }
         return START_NOT_STICKY
     }
 
@@ -163,7 +202,7 @@ class TranslateService : Service() {
                 handler.postDelayed({ grab() }, 120)
             } else grab()
         }
-        handler.postDelayed({ tick() }, TICK_MS)
+        handler.postDelayed({ tick() }, tickMs)
     }
 
     private fun up(r: Rect): Rect =
@@ -213,11 +252,16 @@ class TranslateService : Service() {
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
+        if (engine == 2) {
+            translateOffline(missing, srcs, rects, key)
+            return
+        }
+
         net.execute {
             var result: List<String>? = null
             var error: String? = null
             try {
-                result = translateBatch(missing)
+                result = if (engine == 1) callClaude(missing) else callGemini(missing)
             } catch (e: Exception) {
                 error = e.message ?: "error"
             }
@@ -229,15 +273,43 @@ class TranslateService : Service() {
                     show(srcs, rects, key)
                 } else {
                     busy = false
-                    if (err != null && err.contains("401")) {
-                        Toast.makeText(this, "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u063a\u064a\u0631 \u0635\u062d\u064a\u062d", Toast.LENGTH_LONG).show()
-                        stopSelf()
-                    } else if (System.currentTimeMillis() - lastToast > 10000) {
-                        lastToast = System.currentTimeMillis()
-                        Toast.makeText(this, "\u062a\u0639\u0630\u0631\u062a \u0627\u0644\u062a\u0631\u062c\u0645\u0629: " + err, Toast.LENGTH_SHORT).show()
-                    }
+                    handleError(err ?: "error")
                 }
             }
+        }
+    }
+
+    private fun handleError(err: String) {
+        val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") ||
+            err.contains("API_KEY_INVALID") || err.contains("API key not valid")
+        if (keyError) {
+            Toast.makeText(this, "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u063a\u064a\u0631 \u0635\u062d\u064a\u062d", Toast.LENGTH_LONG).show()
+            stopSelf()
+            return
+        }
+        if (System.currentTimeMillis() - lastToast > 10000) {
+            lastToast = System.currentTimeMillis()
+            val msg = if (err.contains("HTTP 429")) "\u062a\u062c\u0627\u0648\u0632\u062a \u0627\u0644\u062d\u062f \u0627\u0644\u0645\u062c\u0627\u0646\u064a\u060c \u0633\u0623\u062d\u0627\u0648\u0644 \u0628\u0639\u062f \u0642\u0644\u064a\u0644" else "\u062a\u0639\u0630\u0631\u062a \u0627\u0644\u062a\u0631\u062c\u0645\u0629: " + err.take(60)
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun translateOffline(missing: List<String>, srcs: List<String>, rects: List<Rect>, key: String) {
+        val remaining = intArrayOf(missing.size)
+        val finish = fun() {
+            remaining[0] = remaining[0] - 1
+            if (remaining[0] == 0) show(srcs, rects, key)
+        }
+        for (s in missing) {
+            translator!!.translate(s)
+                .addOnSuccessListener { res: String ->
+                    cache.put(s, res)
+                    finish()
+                }
+                .addOnFailureListener { _: Exception ->
+                    cache.put(s, s)
+                    finish()
+                }
         }
     }
 
@@ -283,40 +355,66 @@ class TranslateService : Service() {
         busy = false
     }
 
-    private fun translateBatch(texts: List<String>): List<String> {
-        val arr = JSONArray()
-        for (t in texts) arr.put(t)
-        val system = "You translate on-screen video game text into Arabic. " +
-            "The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic " +
-            "translations, same length and same order. Keep character names, numbers and button names " +
-            "(X, O, L1, R2...) unchanged. Be short and natural. No explanations, no code fences."
-        val body = JSONObject()
-            .put("model", MODEL)
-            .put("max_tokens", 1500)
-            .put("system", system)
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", arr.toString())))
-
-        val conn = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
+    private fun httpPost(url: String, headers: Map<String, String>, body: String): Pair<Int, String> {
+        val conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.connectTimeout = 8000
         conn.readTimeout = 20000
         conn.doOutput = true
         conn.setRequestProperty("content-type", "application/json")
-        conn.setRequestProperty("x-api-key", apiKey)
-        conn.setRequestProperty("anthropic-version", "2023-06-01")
-        conn.outputStream.use { os -> os.write(body.toString().toByteArray(Charsets.UTF_8)) }
-
+        for ((k, v) in headers) conn.setRequestProperty(k, v)
+        conn.outputStream.use { os -> os.write(body.toByteArray(Charsets.UTF_8)) }
         val code = conn.responseCode
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = stream.bufferedReader().use { br -> br.readText() }
-        if (code !in 200..299) throw Exception("HTTP " + code)
+        val text = if (stream == null) "" else stream.bufferedReader().use { br -> br.readText() }
+        return Pair(code, text)
+    }
 
-        var out = JSONObject(text).getJSONArray("content").getJSONObject(0).getString("text").trim()
+    private fun parseList(raw: String, texts: List<String>): List<String> {
+        var out = raw.trim()
         if (out.startsWith("```")) out = out.substringAfter("\n").substringBeforeLast("```").trim()
         val res = JSONArray(out)
         val list = ArrayList<String>()
         for (i in texts.indices) list.add(if (i < res.length()) res.optString(i, texts[i]) else texts[i])
         return list
+    }
+
+    private fun callClaude(texts: List<String>): List<String> {
+        val arr = JSONArray()
+        for (t in texts) arr.put(t)
+        val body = JSONObject()
+            .put("model", CLAUDE_MODEL)
+            .put("max_tokens", 1500)
+            .put("system", SYSTEM)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", arr.toString())))
+        val headers = mapOf("x-api-key" to claudeKey, "anthropic-version" to "2023-06-01")
+        val r = httpPost("https://api.anthropic.com/v1/messages", headers, body.toString())
+        if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
+        val raw = JSONObject(r.second).getJSONArray("content").getJSONObject(0).getString("text")
+        return parseList(raw, texts)
+    }
+
+    private fun callGemini(texts: List<String>): List<String> {
+        val arr = JSONArray()
+        for (t in texts) arr.put(t)
+        val body = JSONObject()
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
+            .put("contents", JSONArray().put(JSONObject().put("role", "user")
+                .put("parts", JSONArray().put(JSONObject().put("text", arr.toString())))))
+            .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 0.2))
+        val headers = mapOf("x-goog-api-key" to geminiKey)
+        var lastErr = "HTTP 0"
+        for (m in GEMINI_MODELS) {
+            val r = httpPost("https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent", headers, body.toString())
+            if (r.first in 200..299) {
+                val raw = JSONObject(r.second).getJSONArray("candidates").getJSONObject(0)
+                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                return parseList(raw, texts)
+            }
+            lastErr = "HTTP " + r.first + " " + r.second.take(200)
+            if (r.first != 404) break
+        }
+        throw Exception(lastErr)
     }
 
     private fun toBitmap(image: Image): Bitmap {
@@ -331,12 +429,15 @@ class TranslateService : Service() {
         running = false
         isRunning = false
         handler.removeCallbacksAndMessages(null)
-        if (::wm.isInitialized) removeSelector()
         net.shutdownNow()
+        if (::wm.isInitialized) {
+            removeSelector()
+            overlay?.let { v -> runCatching { wm.removeView(v) } }
+        }
         display?.release()
         reader?.close()
         projection?.stop()
-        overlay?.let { v -> runCatching { wm.removeView(v) } }
+        translator?.close()
         recognizer.close()
         super.onDestroy()
     }
