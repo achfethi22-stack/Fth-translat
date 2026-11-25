@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +31,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var langSpinner: Spinner
     private lateinit var claudeBox: EditText
     private lateinit var geminiBox: EditText
+    private val modes = listOf(
+        "\u0641\u0648\u0642 \u0627\u0644\u0646\u0635 \u0627\u0644\u0623\u0635\u0644\u064a (\u062b\u0627\u0628\u062a\u0629 \u0628\u062f\u0648\u0646 \u0648\u0645\u064a\u0636)",
+        "\u062a\u063a\u0637\u064a\u0629 \u0627\u0644\u0646\u0635 \u0627\u0644\u0623\u0635\u0644\u064a (\u0642\u062f \u062a\u0648\u0645\u0636)"
+    )
 
     private val captureLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -90,6 +95,37 @@ class MainActivity : ComponentActivity() {
             setSelection(langs.indexOfFirst { it.first == saved }.coerceAtLeast(0))
         }
         root.addView(langSpinner)
+
+        root.addView(label("\n\u0637\u0631\u064a\u0642\u0629 \u0639\u0631\u0636 \u0627\u0644\u062a\u0631\u062c\u0645\u0629:"))
+        val modeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, modes)
+            setSelection(prefs.getInt("mode", 0))
+        }
+        modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                prefs.edit().putInt("mode", pos).apply()
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        root.addView(modeSpinner)
+
+        val fontNow = prefs.getInt("font", 44)
+        val fontLabel = label("\n\u062d\u062c\u0645 \u0627\u0644\u062e\u0637: " + fontNow)
+        root.addView(fontLabel)
+        val fontBar = SeekBar(this).apply {
+            max = 60
+            progress = fontNow - 20
+        }
+        fontBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                val v = p + 20
+                fontLabel.text = "\n\u062d\u062c\u0645 \u0627\u0644\u062e\u0637: " + v
+                prefs.edit().putInt("font", v).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        root.addView(fontBar)
 
         root.addView(Button(this).apply {
             text = "\u0627\u0628\u062f\u0623 \u0627\u0644\u062a\u0631\u062c\u0645\u0629"
