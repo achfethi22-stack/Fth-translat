@@ -65,6 +65,7 @@ class TranslateService : Service() {
 
     private var engine = 0
     private var geminiKey = ""
+    private var srcHint = ""
     private var tickMs = 700L
     private var scale = 1f
     private var offX = 0
@@ -95,6 +96,7 @@ class TranslateService : Service() {
         engine = prefs.getInt("engine", 0)
         geminiKey = (prefs.getString("gemini_key", "") ?: "").trim()
         val lang = prefs.getString("lang", "en") ?: "en"
+        srcHint = if (lang == "en-US") " The source text is American English: understand US slang, idioms and spelling." else ""
         
         if (engine == 0 && geminiKey.isEmpty()) {
             stopSelf(); return START_NOT_STICKY
@@ -117,7 +119,7 @@ class TranslateService : Service() {
         warmup()
 
         if (engine == 1) {
-            val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
+            val src = TranslateLanguage.fromLanguageTag(lang.substringBefore('-')) ?: TranslateLanguage.ENGLISH
             translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build())
             translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
                 .addOnSuccessListener { translator?.translate("hello")?.addOnCompleteListener { handler.post { tick() } } }
@@ -430,7 +432,7 @@ class TranslateService : Service() {
     private fun callGemini(texts: List<String>): List<String> {
         val arr = JSONArray(); for (t in texts) arr.put(t)
         val body = JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM + srcHint))))
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", arr.toString())))))
             .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 0.2))
         val headers = mapOf("x-goog-api-key" to geminiKey)
