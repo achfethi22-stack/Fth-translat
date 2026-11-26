@@ -26,7 +26,7 @@ import android.widget.TextView
 class MainActivity : ComponentActivity() {
 
     private val langs = listOf(
-        "en" to "English", "fr" to "Français", "es" to "Español",
+        "en-US" to "English (American)", "en" to "English", "fr" to "Français", "es" to "Español",
         "de" to "Deutsch", "it" to "Italiano", "pt" to "Português", "tr" to "Türkçe"
     )
     
