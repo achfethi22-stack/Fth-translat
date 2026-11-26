@@ -11,67 +11,56 @@ import android.text.StaticLayout
 import android.text.TextDirectionHeuristics
 import android.text.TextPaint
 import android.view.View
-import kotlin.math.max
 
 class OverlayView(context: Context) : View(context) {
     private var items: List<Pair<Rect, String>> = emptyList()
     val drawn = ArrayList<Rect>()
     var fontSize = 44f
     var above = true
-    
-    private val bg = Paint().apply { 
-        color = 0xCC000000.toInt()
-    }
-    
-    private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { 
-        color = Color.WHITE 
-        textAlign = Paint.Align.CENTER
-    }
+
+    private val bg = Paint().apply { color = 0xFF000000.toInt() }
+    private val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
 
     fun hasItems() = items.isNotEmpty()
 
     fun setItems(list: List<Pair<Rect, String>>) {
-        items = list
+        items = list.sortedBy { p -> p.first.top }
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         drawn.clear()
+        val gap = 10f
+        var lastBottom = -1000f
         for ((r, text) in items) {
-            val pad = 24f 
+            val pad = 24f
             tp.textSize = fontSize
-            
-            // ✅ جعل المربع يأخذ 90% من عرض الشاشة دائماً (ليتسع للجمل الطويلة)
+
             val wF = width * 0.90f
-            val w = wF.toInt()
-            val innerW = w - (pad * 2f).toInt()
-            
+            val innerW = (wF - pad * 2f).toInt()
+
             val layout = StaticLayout.Builder.obtain(text, 0, text.length, tp, innerW)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .build()
-                
+
             val layoutH = layout.height.toFloat()
-            val boxH = layoutH + (pad * 2f)
-            
-            // ✅ تثبيت المربع في منتصف الشاشة تماماً أفقياً
+            val boxH = if (above) layoutH + pad * 2f else maxOf(layoutH + pad * 2f, r.height() + pad * 2f)
             val left = (width.toFloat() - wF) / 2f
-            
-            // تحديد الموقع العمودي (فوق أو تحت النص الأصلي)
-            var top = if (above) r.top.toFloat() - boxH - 12f else r.bottom.toFloat() + 12f
+
+            var top = if (above) r.top.toFloat() - boxH - 12f else r.centerY() - boxH / 2f
             if (above && top < 0f) top = r.bottom.toFloat() + 12f
-            top = top.coerceIn(0f, height.toFloat() - boxH)
-            
-            // رسم الخلفية
-            val rectF = RectF(left, top, left + wF, top + boxH)
-            canvas.drawRoundRect(rectF, 16f, 16f, bg) 
-            
-            // رسم النص
+            if (top < lastBottom + gap) top = lastBottom + gap
+            top = top.coerceIn(0f, maxOf(0f, height.toFloat() - boxH))
+            lastBottom = top + boxH
+
+            canvas.drawRoundRect(RectF(left, top, left + wF, top + boxH), 16f, 16f, bg)
+
             canvas.save()
             canvas.translate(left + pad, top + pad)
             layout.draw(canvas)
             canvas.restore()
-            
+
             drawn.add(Rect(left.toInt(), top.toInt(), (left + wF).toInt(), (top + boxH).toInt()))
         }
     }
