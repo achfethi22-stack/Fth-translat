@@ -34,6 +34,8 @@ class MainActivity : Activity() {
         root.addView(status)
 
         root.addView(makeButton("\u0627\u0628\u062f\u0623 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0645\u0646 \u0627\u0644\u0647\u0627\u062a\u0641") { startReceiver() })
+        root.addView(makeButton("\u062a\u0635\u063a\u064a\u0631 \u0627\u0644\u062e\u0637") { changeFont(-3) })
+        root.addView(makeButton("\u062a\u0643\u0628\u064a\u0631 \u0627\u0644\u062e\u0637") { changeFont(3) })
         root.addView(makeButton("\u0627\u062e\u062a\u0628\u0627\u0631 \u0646\u0627\u0641\u0630\u0629 \u0639\u0627\u0626\u0645\u0629 (PiP)") { testPip() })
         root.addView(makeButton("\u0625\u064a\u0642\u0627\u0641") { stopReceiver() })
         setContentView(root)
@@ -82,6 +84,14 @@ class MainActivity : Activity() {
         }
         startForegroundService(Intent(this, OverlayService::class.java))
         status.text = "\u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u064a\u0639\u0645\u0644 \u0639\u0644\u0649 \u0627\u0644\u0645\u0646\u0641\u0630 8765.\n" + infoText()
+    }
+
+    private fun changeFont(delta: Int) {
+        val p = getSharedPreferences("tvprefs", MODE_PRIVATE)
+        val v = (p.getInt("fontp", 25) + delta).coerceIn(10, 90)
+        p.edit().putInt("fontp", v).apply()
+        status.text = "\u062d\u062c\u0645 \u0627\u0644\u062e\u0637: " + (v / 10f) + "% \u0645\u0646 \u0627\u0631\u062a\u0641\u0627\u0639 \u0627\u0644\u0634\u0627\u0634\u0629\n" + infoText()
+        startService(Intent(this, OverlayService::class.java).setAction("font"))
     }
 
     private fun stopReceiver() {
