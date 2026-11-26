@@ -10,6 +10,7 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -26,7 +27,26 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun fontPx(): Float {
+        val pct = getSharedPreferences("tvprefs", MODE_PRIVATE).getInt("fontp", 25)
+        return resources.displayMetrics.heightPixels * pct / 1000f
+    }
+
+    private fun applyStyle(v: TextView) {
+        val px = fontPx()
+        v.setTextSize(TypedValue.COMPLEX_UNIT_PX, px)
+        val h = (px * 0.8f).toInt()
+        val t = (px * 0.45f).toInt()
+        v.setPadding(h, t, h, t)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "font") {
+            val fv = view
+            if (fv != null) applyStyle(fv)
+            if (view == null) stopSelf()
+            return START_NOT_STICKY
+        }
         startAsForeground()
         if (view == null) {
             addOverlay()
@@ -50,10 +70,9 @@ class OverlayService : Service() {
         val tv = TextView(this)
         tv.setTextColor(Color.WHITE)
         tv.setBackgroundColor(Color.BLACK)
-        tv.textSize = 34f
-        tv.setPadding(40, 24, 40, 24)
+        applyStyle(tv)
         tv.gravity = Gravity.CENTER
-        tv.maxWidth = (resources.displayMetrics.widthPixels * 0.8f).toInt()
+        tv.maxWidth = (resources.displayMetrics.widthPixels * 0.75f).toInt()
         tv.text = "\u0628\u0627\u0646\u062a\u0638\u0627\u0631 \u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u0645\u0646 \u0627\u0644\u0647\u0627\u062a\u0641..."
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -92,6 +111,7 @@ class OverlayService : Service() {
         if (text.isBlank()) {
             v.visibility = View.GONE
         } else {
+            applyStyle(v)
             v.text = text.trim()
             v.visibility = View.VISIBLE
             handler.postDelayed(hideRunnable, 15000)
