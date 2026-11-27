@@ -4,12 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.PixelFormat
-import android.graphics.Rect
+import android.graphics.*
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -21,43 +16,35 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.Translator
-import com.google.mlkit.nl.translate.TranslatorOptions
+import com.google.mlkit.nl.translate.*
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.URL
+import java.net.*
 import java.util.concurrent.Executors
+import kotlin.math.max
 
 class TranslateService : Service() {
-
     companion object {
         const val ACTION_STOP = "stop"
         const val ACTION_SELECT = "select"
         @Volatile var isRunning = false
 
-        const val CLAUDE_MODEL = "claude-haiku-5-5"
-        val GEMINI_MODELS = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite")
+        // \u2705 \u062a\u062d\u062f\u064a\u062b \u0646\u0645\u0627\u0630\u062c Gemini
+        val GEMINI_MODELS = listOf("gemini-3.8-flash", "gemini-3.6-flash")
         const val MAX_SIDE = 1280f
+        const val MIN_API_GAP_GEMINI = 1200L
 
-        const val SYSTEM = "You translate on-screen video game text into Arabic. " +
-            "The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic " +
-            "translations, same length and same order. Keep character names, numbers and button names " +
-            "(X, O, L1, R2...) unchanged. Be short and natural. No explanations, no code fences."
+        const val SYSTEM = "You translate on-screen video game text into Arabic. The user message is a JSON array of strings. Reply with ONLY a JSON array of the Arabic translations, same length and same order. Keep character names, numbers and button names (X, O, L1, R2...) unchanged. Be short and natural. No explanations, no code fences."
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -71,12 +58,15 @@ class TranslateService : Service() {
     private var selector: SelectView? = null
     private var translator: Translator? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private val cache = HashMap<String, String>()
+
+    private val cache = object : LinkedHashMap<String, String>(200, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 500
+    }
 
     private var engine = 0
-    private var claudeKey = ""
     private var geminiKey = ""
-    private var tickMs = 1000L
+    private var srcHint = ""
+    private var tickMs = 700L
     private var scale = 1f
     private var offX = 0
     private var offY = 0
@@ -85,12 +75,12 @@ class TranslateService : Service() {
     private var lastKey = ""
     private var lastToast = 0L
     private var running = false
-    private var offlineReady = false
     @Volatile private var frames = 0
     private var emptyCount = 0
     private var pendingKey = ""
     private var pendingCount = 0
     private var lastApi = 0L
+    @Volatile private var currentRequestId = 0
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -104,14 +94,14 @@ class TranslateService : Service() {
 
         val prefs = getSharedPreferences("prefs", MODE_PRIVATE)
         engine = prefs.getInt("engine", 0)
-        claudeKey = prefs.getString("api_key", "") ?: ""
-        geminiKey = prefs.getString("gemini_key", "") ?: ""
+        geminiKey = (prefs.getString("gemini_key", "") ?: "").trim()
         val lang = prefs.getString("lang", "en") ?: "en"
-        if ((engine == 0 && geminiKey.isEmpty()) || (engine == 1 && claudeKey.isEmpty())) {
-            stopSelf()
-            return START_NOT_STICKY
+        srcHint = if (lang == "en-US") " The source text is American English: understand US slang, idioms and spelling." else ""
+        
+        if (engine == 0 && geminiKey.isEmpty()) {
+            stopSelf(); return START_NOT_STICKY
         }
-        tickMs = if (engine == 1) 800L else 1000L
+        tickMs = 700L
 
         @Suppress("DEPRECATION")
         val data = intent!!.getParcelableExtra<Intent>("data")!!
@@ -126,46 +116,39 @@ class TranslateService : Service() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         addOverlay()
         setupDisplay()
+        warmup()
 
-        val src = TranslateLanguage.fromLanguageTag(lang) ?: TranslateLanguage.ENGLISH
-        translator = Translation.getClient(
-            TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build()
-        )
-        if (engine == 2) {
+        if (engine == 1) {
+            val src = TranslateLanguage.fromLanguageTag(lang.substringBefore('-')) ?: TranslateLanguage.ENGLISH
+            translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(src).setTargetLanguage(TranslateLanguage.ARABIC).build())
             translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
-                .addOnSuccessListener {
-                    offlineReady = true
-                    handler.post { tick() }
-                }
+                .addOnSuccessListener { translator?.translate("hello")?.addOnCompleteListener { handler.post { tick() } } }
                 .addOnFailureListener { stopSelf() }
         } else {
-            translator!!.downloadModelIfNeeded(DownloadConditions.Builder().build())
-                .addOnSuccessListener { offlineReady = true }
-                .addOnFailureListener { offlineReady = false }
             handler.post { tick() }
         }
         return START_NOT_STICKY
     }
 
+    private fun warmup() {
+        if (engine == 1) return
+        net.execute {
+            try { callGemini(listOf("hi")) } catch (_: Exception) {}
+        }
+    }
+
     private fun startAsForeground() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("ps", "PS Translate", NotificationManager.IMPORTANCE_LOW))
-        val stop = PendingIntent.getService(
-            this, 0, Intent(this, TranslateService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val sel = PendingIntent.getService(
-            this, 1, Intent(this, TranslateService::class.java).setAction(ACTION_SELECT),
-            PendingIntent.FLAG_IMMUTABLE
-        )
+        val stop = PendingIntent.getService(this, 0, Intent(this, TranslateService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
+        val sel = PendingIntent.getService(this, 1, Intent(this, TranslateService::class.java).setAction(ACTION_SELECT), PendingIntent.FLAG_IMMUTABLE)
         val n = Notification.Builder(this, "ps")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle("\u0627\u0644\u062a\u0631\u062c\u0645\u0629 \u062a\u0639\u0645\u0644")
             .addAction(Notification.Action.Builder(null, "\u062a\u062d\u062f\u064a\u062f \u0627\u0644\u0645\u0646\u0637\u0642\u0629", sel).build())
             .addAction(Notification.Action.Builder(null, "\u0625\u064a\u0642\u0627\u0641", stop).build())
             .build()
-        if (Build.VERSION.SDK_INT >= 29)
-            startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         else startForeground(1, n)
     }
 
@@ -173,12 +156,10 @@ class TranslateService : Service() {
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-        if (Build.VERSION.SDK_INT >= 28)
-            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        if (Build.VERSION.SDK_INT >= 28) lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         overlay = OverlayView(this)
         wm.addView(overlay, lp)
     }
@@ -190,10 +171,7 @@ class TranslateService : Service() {
         reader = ImageReader.newInstance(m.widthPixels, m.heightPixels, PixelFormat.RGBA_8888, 2)
         reader!!.setOnImageAvailableListener({ _: ImageReader -> frames = frames + 1 }, handler)
         if (display == null) {
-            display = projection!!.createVirtualDisplay(
-                "ps-translate", m.widthPixels, m.heightPixels, m.densityDpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, null
-            )
+            display = projection!!.createVirtualDisplay("ps-translate", m.widthPixels, m.heightPixels, m.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, null)
         } else {
             display!!.resize(m.widthPixels, m.heightPixels, m.densityDpi)
             display!!.setSurface(reader!!.surface)
@@ -225,17 +203,15 @@ class TranslateService : Service() {
                 waitForFrames(frames, System.currentTimeMillis())
             } else grab()
         }
-        handler.postDelayed({ tick() }, if (cover) 3000L else tickMs)
+        handler.postDelayed({ tick() }, if (cover) 1500L else tickMs)
     }
 
     private fun waitForFrames(start: Int, t0: Long) {
-        if (frames - start >= 2 || System.currentTimeMillis() - t0 > 200) grab()
+        if (frames - start >= 1 || System.currentTimeMillis() - t0 > 120) grab()
         else handler.postDelayed({ waitForFrames(start, t0) }, 20)
     }
 
-    private fun up(r: Rect): Rect =
-        Rect((r.left / scale).toInt() + offX, (r.top / scale).toInt() + offY,
-            (r.right / scale).toInt() + offX, (r.bottom / scale).toInt() + offY)
+    private fun up(r: Rect): Rect = Rect((r.left / scale).toInt() + offX, (r.top / scale).toInt() + offY, (r.right / scale).toInt() + offX, (r.bottom / scale).toInt() + offY)
 
     private fun grab() {
         val image = reader?.acquireLatestImage()
@@ -267,24 +243,17 @@ class TranslateService : Service() {
         val ch = ((fb * shot.height).toInt() - offY).coerceIn(2, shot.height - offY)
         val full = if (cw == shot.width && ch == shot.height) shot else Bitmap.createBitmap(shot, offX, offY, cw, ch)
         scale = minOf(1f, MAX_SIDE / maxOf(full.width, full.height).toFloat())
-        val bmp = if (scale < 1f)
-            Bitmap.createScaledBitmap(full, (full.width * scale).toInt(), (full.height * scale).toInt(), true)
-        else full
+        val bmp = if (scale < 1f) Bitmap.createScaledBitmap(full, (full.width * scale).toInt(), (full.height * scale).toInt(), true) else full
         recognizer.process(InputImage.fromBitmap(bmp, 0))
             .addOnSuccessListener { r: Text ->
                 val cover = prefs.getInt("mode", 0) == 1
                 val own = overlay?.drawn ?: ArrayList<Rect>()
                 val blocks = r.textBlocks.filter { b ->
                     val bb = b.boundingBox
-                    if (bb == null || b.text.length < 3) {
-                        false
-                    } else if (cover) {
-                        true
-                    } else {
-                        val c = up(bb)
-                        !own.any { o -> o.contains(c.centerX(), c.centerY()) }
-                    }
-                }.take(30)
+                    if (bb == null || b.text.length < 3) false
+                    else if (cover) true
+                    else { val c = up(bb); !own.any { o -> o.contains(c.centerX(), c.centerY()) } }
+                }.take(50)
                 handleBlocks(blocks)
             }
             .addOnFailureListener { _: Exception -> busy = false }
@@ -292,81 +261,53 @@ class TranslateService : Service() {
 
     private fun handleBlocks(blocks: List<Text.TextBlock>) {
         if (blocks.isEmpty()) {
-            emptyCount = emptyCount + 1
-            if (emptyCount >= 4) {
-                overlay?.setItems(emptyList())
-                sendToTv(emptyList())
-                lastKey = ""
-            }
-            busy = false
-            return
+            emptyCount++
+            if (emptyCount >= 4) { overlay?.setItems(emptyList()); sendToTv(emptyList()); lastKey = "" }
+            busy = false; return
         }
         emptyCount = 0
         val groups = mergeBlocks(blocks)
-        if (groups.isEmpty()) {
-            overlay?.setItems(emptyList())
-            sendToTv(emptyList())
-            lastKey = ""
-            busy = false
-            return
-        }
+        if (groups.isEmpty()) { overlay?.setItems(emptyList()); sendToTv(emptyList()); lastKey = ""; busy = false; return }
+
         val srcs = groups.map { g -> g.second }
         val key = srcs.joinToString("|") { t -> t.lowercase().filter { c -> c.isLetterOrDigit() } }
         val coverNow = getSharedPreferences("prefs", MODE_PRIVATE).getInt("mode", 0) == 1
-        if (similar(key, lastKey)) {
-            pendingKey = ""
-            pendingCount = 0
-            busy = false
-            return
-        }
-        if (similar(key, pendingKey)) {
-            pendingCount = pendingCount + 1
-        } else {
-            pendingKey = key
-            pendingCount = 1
-        }
-        if (!coverNow && pendingCount < 2) {
-            busy = false
-            return
-        }
+        if (similar(key, lastKey)) { pendingKey = ""; pendingCount = 0; busy = false; return }
+        if (similar(key, pendingKey)) pendingCount++ else { pendingKey = key; pendingCount = 1 }
+
+        if (!coverNow && pendingCount < 2) { busy = false; return }
 
         val rects = groups.map { g -> up(g.first) }
         val missing = srcs.filter { s -> !cache.containsKey(s) }.distinct()
         if (missing.isEmpty()) { show(srcs, rects, key); return }
 
-        if (engine == 2) {
-            translateOffline(missing, srcs, rects, key)
-            return
-        }
+        if (engine == 1) { translateOffline(missing, srcs, rects, key); return }
 
-        if (engine == 0 && System.currentTimeMillis() - lastApi < 4000) {
+        val now = System.currentTimeMillis()
+        if (now - lastApi < MIN_API_GAP_GEMINI) {
+            val wait = MIN_API_GAP_GEMINI - (now - lastApi)
             busy = false
+            handler.postDelayed({ if (running && !busy) { busy = true; handleBlocks(blocks) } }, wait)
             return
         }
-        lastApi = System.currentTimeMillis()
+        lastApi = now
+        val reqId = ++currentRequestId
 
         net.execute {
             var result: List<String>? = null
             var error: String? = null
             try {
-                result = if (engine == 1) callClaude(missing) else callGemini(missing)
-            } catch (e: Exception) {
-                error = e.message ?: "error"
-            }
-            val res = result
-            val err = error
+                result = callGemini(missing)
+            } catch (e: Exception) { error = e.message ?: "error" }
+            
             handler.post {
-                if (res != null) {
-                    for (i in missing.indices) cache.put(missing[i], res[i])
+                if (reqId != currentRequestId) { busy = false; return@post }
+                if (result != null) {
+                    for (i in missing.indices) cache.put(missing[i], result[i])
                     show(srcs, rects, key)
                 } else {
-                    val e = err ?: "error"
-                    if (offlineReady && !isKeyError(e)) {
-                        translateOffline(missing, srcs, rects, key)
-                    } else {
-                        busy = false
-                        handleError(e)
-                    }
+                    busy = false
+                    handleError(error ?: "error")
                 }
             }
         }
@@ -390,13 +331,10 @@ class TranslateService : Service() {
                 ln.pieces.add(Pair(bb.left, t))
                 lines.add(ln)
             } else {
-                found.rect.union(bb)
-                found.pieces.add(Pair(bb.left, t))
-                found.h = maxOf(found.h, bb.height())
+                found.rect.union(bb); found.pieces.add(Pair(bb.left, t)); found.h = maxOf(found.h, bb.height())
             }
         }
         lines.sortBy { ln -> ln.rect.top }
-
         val out = ArrayList<Pair<Rect, String>>()
         var lastH = 0
         for (ln in lines) {
@@ -408,28 +346,25 @@ class TranslateService : Service() {
                 val gap = b.top - a.bottom
                 val overlapW = minOf(a.right, b.right) - maxOf(a.left, b.left)
                 val minW = minOf(a.width(), b.width())
-                if (gap <= lastH * 0.8f && overlapW > minW * 0.3f) {
-                    val u = Rect(a)
-                    u.union(b)
-                    out[out.size - 1] = Pair(u, prev.second + " " + ln.text())
-                    merged = true
+                val sameSize = kotlin.math.abs(a.height() - b.height()) < maxOf(a.height(), b.height()) * 0.4f
+                if (gap <= lastH * 0.5f && overlapW > minW * 0.5f && sameSize) {
+                    val u = Rect(a); u.union(b); out[out.size - 1] = Pair(u, prev.second + " " + ln.text()); merged = true
                 }
             }
             if (!merged) out.add(Pair(Rect(b), ln.text()))
             lastH = ln.h
         }
-        return out.take(10)
+        return out.take(20)
     }
 
     private fun similar(a: String, b: String): Boolean {
         if (a == b) return true
         if (a.length < 6 || b.length < 6) return false
-        val ga = HashSet<String>()
+        val ga = HashSet<String>(); val gb = HashSet<String>()
         for (i in 0..a.length - 3) ga.add(a.substring(i, i + 3))
-        val gb = HashSet<String>()
         for (i in 0..b.length - 3) gb.add(b.substring(i, i + 3))
         var inter = 0
-        for (x in ga) if (gb.contains(x)) inter = inter + 1
+        for (x in ga) if (gb.contains(x)) inter++
         val union = ga.size + gb.size - inter
         return union > 0 && inter.toFloat() / union.toFloat() >= 0.8f
     }
@@ -442,27 +377,15 @@ class TranslateService : Service() {
             try {
                 val bytes = msg.toByteArray(Charsets.UTF_8)
                 val sock = DatagramSocket()
-                sock.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 8765))
-                sock.close()
-            } catch (e: Exception) {
-                // \u062a\u062c\u0627\u0647\u0644 \u0623\u062e\u0637\u0627\u0621 \u0627\u0644\u0634\u0628\u0643\u0629
-            }
+                sock.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName(ip), 8765)); sock.close()
+            } catch (_: Exception) {}
         }
-    }
-
-    private fun isKeyError(err: String): Boolean {
-        return err.contains("HTTP 401") || err.contains("HTTP 403") ||
-            err.contains("API_KEY_INVALID") || err.contains("API key not valid")
     }
 
     private fun handleError(err: String) {
-        val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") ||
-            err.contains("API_KEY_INVALID") || err.contains("API key not valid")
-        if (keyError) {
-            Toast.makeText(this, "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u063a\u064a\u0631 \u0635\u062d\u064a\u062d", Toast.LENGTH_LONG).show()
-            stopSelf()
-            return
-        }
+        Log.e("PS_TRANSLATE", "API Error: $err")
+        val keyError = err.contains("HTTP 401") || err.contains("HTTP 403") || err.contains("API_KEY_INVALID") || err.contains("API key not valid")
+        if (keyError) { Toast.makeText(this, "\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u063a\u064a\u0631 \u0635\u062d\u064a\u062d", Toast.LENGTH_LONG).show(); stopSelf(); return }
         if (System.currentTimeMillis() - lastToast > 10000) {
             lastToast = System.currentTimeMillis()
             val msg = if (err.contains("HTTP 429")) "\u062a\u062c\u0627\u0648\u0632\u062a \u0627\u0644\u062d\u062f \u0627\u0644\u0645\u062c\u0627\u0646\u064a\u060c \u0633\u0623\u062d\u0627\u0648\u0644 \u0628\u0639\u062f \u0642\u0644\u064a\u0644" else "\u062a\u0639\u0630\u0631\u062a \u0627\u0644\u062a\u0631\u062c\u0645\u0629: " + err.take(60)
@@ -472,57 +395,29 @@ class TranslateService : Service() {
 
     private fun translateOffline(missing: List<String>, srcs: List<String>, rects: List<Rect>, key: String) {
         val remaining = intArrayOf(missing.size)
-        val finish = fun() {
-            remaining[0] = remaining[0] - 1
-            if (remaining[0] == 0) show(srcs, rects, key)
-        }
+        val finish = fun() { remaining[0]--; if (remaining[0] == 0) show(srcs, rects, key) }
         for (s in missing) {
             translator!!.translate(s)
-                .addOnSuccessListener { res: String ->
-                    cache.put(s, res)
-                    finish()
-                }
-                .addOnFailureListener { _: Exception ->
-                    cache.put(s, s)
-                    finish()
-                }
+                .addOnSuccessListener { res: String -> cache.put(s, res); finish() }
+                .addOnFailureListener { _: Exception -> finish() }
         }
     }
 
     private fun showSelector() {
         if (selector != null) return
         selecting = true
-        val v = SelectView(this) { l: Float, t: Float, r: Float, b: Float ->
+        val v = SelectView(this) { l, t, r, b ->
             val e = getSharedPreferences("prefs", MODE_PRIVATE).edit()
-            e.putFloat("reg_l", l)
-            e.putFloat("reg_t", t)
-            e.putFloat("reg_r", r)
-            e.putFloat("reg_b", b)
-            e.putBoolean("auto_bottom", false)
-            e.apply()
-            removeSelector()
-            overlay?.setItems(emptyList())
-            lastKey = ""
+            e.putFloat("reg_l", l); e.putFloat("reg_t", t); e.putFloat("reg_r", r); e.putFloat("reg_b", b); e.putBoolean("auto_bottom", false); e.apply()
+            removeSelector(); overlay?.setItems(emptyList()); lastKey = ""
             Toast.makeText(this, "\u062a\u0645 \u062d\u0641\u0638 \u0627\u0644\u0645\u0646\u0637\u0642\u0629", Toast.LENGTH_SHORT).show()
         }
-        val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-        if (Build.VERSION.SDK_INT >= 28)
-            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        selector = v
-        wm.addView(v, lp)
+        val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT)
+        if (Build.VERSION.SDK_INT >= 28) lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        selector = v; wm.addView(v, lp)
     }
 
-    private fun removeSelector() {
-        selector?.let { v -> runCatching { wm.removeView(v) } }
-        selector = null
-        selecting = false
-    }
+    private fun removeSelector() { selector?.let { v -> runCatching { wm.removeView(v) } }; selector = null; selecting = false }
 
     private fun show(srcs: List<String>, rects: List<Rect>, key: String) {
         val list = ArrayList<Pair<Rect, String>>()
@@ -530,20 +425,13 @@ class TranslateService : Service() {
         val p = getSharedPreferences("prefs", MODE_PRIVATE)
         overlay?.fontSize = p.getInt("font", 44).toFloat()
         overlay?.above = p.getInt("mode", 0) == 0
-        overlay?.setItems(list)
-        sendToTv(list.map { p -> p.second })
-        lastKey = key
-        pendingKey = ""
-        pendingCount = 0
-        busy = false
+        overlay?.setItems(list); sendToTv(list.map { p -> p.second })
+        lastKey = key; pendingKey = ""; pendingCount = 0; busy = false
     }
 
     private fun httpPost(url: String, headers: Map<String, String>, body: String): Pair<Int, String> {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.connectTimeout = 10000
-        conn.readTimeout = 25000
-        conn.doOutput = true
+        conn.requestMethod = "POST"; conn.connectTimeout = 8000; conn.readTimeout = 20000; conn.doOutput = true
         conn.setRequestProperty("content-type", "application/json")
         for ((k, v) in headers) conn.setRequestProperty(k, v)
         conn.outputStream.use { os -> os.write(body.toByteArray(Charsets.UTF_8)) }
@@ -556,52 +444,28 @@ class TranslateService : Service() {
     private fun parseList(raw: String, texts: List<String>): List<String> {
         var out = raw.trim()
         if (out.startsWith("```")) out = out.substringAfter("\n").substringBeforeLast("```").trim()
-        val res = JSONArray(out)
+        val start = out.indexOf('['); val end = out.lastIndexOf(']')
+        if (start >= 0 && end > start) out = out.substring(start, end + 1)
+        val res = try { JSONArray(out) } catch (e: Exception) { return texts }
+        if (res.length() < texts.size) return texts
         val list = ArrayList<String>()
-        for (i in texts.indices) list.add(if (i < res.length()) res.optString(i, texts[i]) else texts[i])
+        for (i in texts.indices) list.add(res.optString(i, texts[i]))
         return list
     }
 
-    private fun callClaude(texts: List<String>): List<String> {
-        val arr = JSONArray()
-        for (t in texts) arr.put(t)
-        val body = JSONObject()
-            .put("model", CLAUDE_MODEL)
-            .put("max_tokens", 1500)
-            .put("system", SYSTEM)
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", arr.toString())))
-        val headers = mapOf("x-api-key" to claudeKey, "anthropic-version" to "2023-06-01")
-        val r = httpPost("https://api.anthropic.com/v1/messages", headers, body.toString())
-        if (r.first !in 200..299) throw Exception("HTTP " + r.first + " " + r.second.take(200))
-        val raw = JSONObject(r.second).getJSONArray("content").getJSONObject(0).getString("text")
-        return parseList(raw, texts)
-    }
-
     private fun callGemini(texts: List<String>): List<String> {
-        val arr = JSONArray()
-        for (t in texts) arr.put(t)
+        val arr = JSONArray(); for (t in texts) arr.put(t)
         val body = JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM))))
-            .put("contents", JSONArray().put(JSONObject().put("role", "user")
-                .put("parts", JSONArray().put(JSONObject().put("text", arr.toString())))))
+            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", SYSTEM + srcHint))))
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", arr.toString())))))
             .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("temperature", 0.2))
         val headers = mapOf("x-goog-api-key" to geminiKey)
         var lastErr = "HTTP 0"
-        for ((i, m) in GEMINI_MODELS.withIndex()) {
-            val r = try {
-                httpPost("https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent", headers, body.toString())
-            } catch (e: java.io.IOException) {
-                lastErr = "timeout " + (e.message ?: "")
-                if (i >= 1) break
-                continue
-            }
-            if (r.first in 200..299) {
-                val raw = JSONObject(r.second).getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                return parseList(raw, texts)
-            }
+        for (m in GEMINI_MODELS) {
+            val r = httpPost("https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent", headers, body.toString())
+            if (r.first in 200..299) return parseList(JSONObject(r.second).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text"), texts)
             lastErr = "HTTP " + r.first + " " + r.second.take(200)
-            if (r.first != 404 && r.first != 503 && r.first != 429) break
+            if (r.first != 404) break
         }
         throw Exception(lastErr)
     }
@@ -615,52 +479,26 @@ class TranslateService : Service() {
     }
 
     override fun onDestroy() {
-        running = false
-        isRunning = false
-        handler.removeCallbacksAndMessages(null)
-        net.shutdownNow()
-        udp.shutdownNow()
-        if (::wm.isInitialized) {
-            removeSelector()
-            overlay?.let { v -> runCatching { wm.removeView(v) } }
-        }
-        display?.release()
-        reader?.close()
-        projection?.stop()
-        translator?.close()
-        recognizer.close()
+        running = false; isRunning = false
+        handler.removeCallbacksAndMessages(null); net.shutdownNow(); udp.shutdownNow()
+        if (::wm.isInitialized) { removeSelector(); overlay?.let { v -> runCatching { wm.removeView(v) } } }
+        display?.release(); reader?.close(); projection?.stop(); translator?.close(); recognizer.close()
         super.onDestroy()
     }
 }
 
 class SelectView(context: Context, private val onDone: (Float, Float, Float, Float) -> Unit) : View(context) {
-    private var sx = 0f
-    private var sy = 0f
-    private var ex = 0f
-    private var ey = 0f
-    private var dragging = false
+    private var sx = 0f; private var sy = 0f; private var ex = 0f; private var ey = 0f; private var dragging = false
     private val dim = Paint().apply { color = 0x99000000.toInt() }
     private val fill = Paint().apply { color = 0x3300FF00 }
-    private val line = Paint().apply {
-        color = Color.GREEN
-        style = Paint.Style.STROKE
-        strokeWidth = 6f
-    }
-    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 46f
-        textAlign = Paint.Align.CENTER
-    }
+    private val line = Paint().apply { color = Color.GREEN; style = Paint.Style.STROKE; strokeWidth = 6f }
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 46f; textAlign = Paint.Align.CENTER }
 
     override fun onDraw(canvas: Canvas) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dim)
         if (dragging) {
-            val l = minOf(sx, ex)
-            val t = minOf(sy, ey)
-            val r = maxOf(sx, ex)
-            val b = maxOf(sy, ey)
-            canvas.drawRect(l, t, r, b, fill)
-            canvas.drawRect(l, t, r, b, line)
+            val l = minOf(sx, ex); val t = minOf(sy, ey); val r = maxOf(sx, ex); val b = maxOf(sy, ey)
+            canvas.drawRect(l, t, r, b, fill); canvas.drawRect(l, t, r, b, line)
         }
         canvas.drawText("\u0627\u0633\u062d\u0628 \u0628\u0625\u0635\u0628\u0639\u0643 \u0644\u062a\u062d\u062f\u064a\u062f \u0645\u0646\u0637\u0642\u0629 \u0627\u0644\u062d\u0648\u0627\u0631", width / 2f, 130f, txt)
         canvas.drawText("\u0627\u0644\u0645\u0633 \u0628\u062f\u0648\u0646 \u0633\u062d\u0628 \u0644\u062a\u0631\u062c\u0645\u0629 \u0627\u0644\u0634\u0627\u0634\u0629 \u0643\u0644\u0647\u0627", width / 2f, 200f, txt)
@@ -668,29 +506,13 @@ class SelectView(context: Context, private val onDone: (Float, Float, Float, Flo
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.action) {
-            MotionEvent.ACTION_DOWN -> {
-                sx = e.x
-                sy = e.y
-                ex = e.x
-                ey = e.y
-                dragging = true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                ex = e.x
-                ey = e.y
-            }
+            MotionEvent.ACTION_DOWN -> { sx = e.x; sy = e.y; ex = e.x; ey = e.y; dragging = true }
+            MotionEvent.ACTION_MOVE -> { ex = e.x; ey = e.y }
             MotionEvent.ACTION_UP -> {
-                ex = e.x
-                ey = e.y
-                dragging = false
-                val w = width.toFloat()
-                val h = height.toFloat()
-                val l = minOf(sx, ex)
-                val t = minOf(sy, ey)
-                val r = maxOf(sx, ex)
-                val b = maxOf(sy, ey)
-                if (r - l < 60f || b - t < 60f) onDone(0f, 0f, 1f, 1f)
-                else onDone(l / w, t / h, r / w, b / h)
+                ex = e.x; ey = e.y; dragging = false
+                val w = width.toFloat(); val h = height.toFloat()
+                val l = minOf(sx, ex); val t = minOf(sy, ey); val r = maxOf(sx, ex); val b = maxOf(sy, ey)
+                if (r - l < 60f || b - t < 60f) onDone(0f, 0f, 1f, 1f) else onDone(l / w, t / h, r / w, b / h)
             }
         }
         invalidate()
