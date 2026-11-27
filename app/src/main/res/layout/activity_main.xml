@@ -12,11 +12,11 @@
         android:orientation="vertical"
         android:padding="24dp">
 
-        <!-- العنوان -->
+        <!-- &#x0627;&#x0644;&#x0639;&#x0646;&#x0648;&#x0627;&#x0646; -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="مترجم ألعاب PS5"
+            android:text="&#x0645;&#x062A;&#x0631;&#x062C;&#x0645; &#x0623;&#x0644;&#x0639;&#x0627;&#x0628; PS5"
             android:textSize="28sp"
             android:textStyle="bold"
             android:textColor="?attr/colorPrimary"
@@ -26,13 +26,13 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="ترجمة فورية واحترافية للنص الظاهر على الشاشة"
+            android:text="&#x062A;&#x0631;&#x062C;&#x0645;&#x0629; &#x0641;&#x0648;&#x0631;&#x064A;&#x0629; &#x0648;&#x0627;&#x062D;&#x062A;&#x0631;&#x0627;&#x0641;&#x064A;&#x0629; &#x0644;&#x0644;&#x0646;&#x0635; &#x0627;&#x0644;&#x0638;&#x0627;&#x0647;&#x0631; &#x0639;&#x0644;&#x0649; &#x0627;&#x0644;&#x0634;&#x0627;&#x0634;&#x0629;"
             android:textSize="14sp"
             android:textColor="?attr/colorOnSurfaceVariant"
             android:gravity="center"
             android:layout_marginBottom="24dp"/>
 
-        <!-- بطاقة إعدادات المحرك -->
+        <!-- &#x0628;&#x0637;&#x0627;&#x0642;&#x0629; &#x0625;&#x0639;&#x062F;&#x0627;&#x062F;&#x0627;&#x062A; &#x0627;&#x0644;&#x0645;&#x062D;&#x0631;&#x0643; -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -51,7 +51,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="محرك الترجمة"
+                    android:text="&#x0645;&#x062D;&#x0631;&#x0643; &#x0627;&#x0644;&#x062A;&#x0631;&#x062C;&#x0645;&#x0629;"
                     android:textStyle="bold"
                     android:layout_marginBottom="8dp"/>
 
@@ -59,7 +59,7 @@
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="اختر المحرك">
+                    android:hint="&#x0627;&#x062E;&#x062A;&#x0631; &#x0627;&#x0644;&#x0645;&#x062D;&#x0631;&#x0643;">
 
                     <com.google.android.material.textfield.MaterialAutoCompleteTextView
                         android:id="@+id/engineSpinner"
@@ -74,7 +74,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:hint="مفتاح Gemini (من aistudio.google.com)">
+                    android:hint="&#x0645;&#x0641;&#x062A;&#x0627;&#x062D; Gemini (&#x0645;&#x0646; aistudio.google.com)">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/geminiBox"
@@ -85,7 +85,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- بطاقة الإعدادات الإضافية -->
+        <!-- &#x0628;&#x0637;&#x0627;&#x0642;&#x0629; &#x0627;&#x0644;&#x0625;&#x0639;&#x062F;&#x0627;&#x062F;&#x0627;&#x062A; &#x0627;&#x0644;&#x0625;&#x0636;&#x0627;&#x0641;&#x064A;&#x0629; -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -104,16 +104,16 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="إعدادات العرض"
+                    android:text="&#x0625;&#x0639;&#x062F;&#x0627;&#x062F;&#x0627;&#x062A; &#x0627;&#x0644;&#x0639;&#x0631;&#x0636;"
                     android:textStyle="bold"
                     android:layout_marginBottom="8dp"/>
 
-                <!-- وضع العرض -->
+                <!-- &#x0648;&#x0636;&#x0639; &#x0627;&#x0644;&#x0639;&#x0631;&#x0636; -->
                 <com.google.android.material.textfield.TextInputLayout
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="طريقة عرض الترجمة">
+                    android:hint="&#x0637;&#x0631;&#x064A;&#x0642;&#x0629; &#x0639;&#x0631;&#x0636; &#x0627;&#x0644;&#x062A;&#x0631;&#x062C;&#x0645;&#x0629;">
 
                     <com.google.android.material.textfield.MaterialAutoCompleteTextView
                         android:id="@+id/modeSpinner"
@@ -122,13 +122,13 @@
                         android:inputType="none"/>
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <!-- اللغة -->
+                <!-- &#x0627;&#x0644;&#x0644;&#x063A;&#x0629; -->
                 <com.google.android.material.textfield.TextInputLayout
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:hint="لغة اللعبة (للوضع بدون إنترنت)">
+                    android:hint="&#x0644;&#x063A;&#x0629; &#x0627;&#x0644;&#x0644;&#x0639;&#x0628;&#x0629; (&#x0644;&#x0644;&#x0648;&#x0636;&#x0639; &#x0628;&#x062F;&#x0648;&#x0646; &#x0625;&#x0646;&#x062A;&#x0631;&#x0646;&#x062A;)">
 
                     <com.google.android.material.textfield.MaterialAutoCompleteTextView
                         android:id="@+id/langSpinner"
@@ -137,12 +137,12 @@
                         android:inputType="none"/>
                 </com.google.android.material.textfield.TextInputLayout>
 
-                <!-- حجم الخط -->
+                <!-- &#x062D;&#x062C;&#x0645; &#x0627;&#x0644;&#x062E;&#x0637; -->
                 <TextView
                     android:id="@+id/fontLabel"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="حجم الخط: 44"
+                    android:text="&#x062D;&#x062C;&#x0645; &#x0627;&#x0644;&#x062E;&#x0637;: 44"
                     android:layout_marginTop="16dp"
                     android:layout_marginBottom="8dp"/>
 
@@ -154,15 +154,46 @@
                     android:valueTo="80"
                     android:stepSize="1"
                     android:value="44"/>
+
+                <com.google.android.material.checkbox.MaterialCheckBox
+                    android:id="@+id/autoBottomBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="&#x062A;&#x0631;&#x062C;&#x0645;&#x0629; &#x0627;&#x0644;&#x0642;&#x0633;&#x0645; &#x0627;&#x0644;&#x0633;&#x0641;&#x0644;&#x064A; &#x0645;&#x0646; &#x0627;&#x0644;&#x0644;&#x0639;&#x0628;&#x0629; &#x0641;&#x0642;&#x0637; (&#x062A;&#x0644;&#x0642;&#x0627;&#x0626;&#x064A;)"/>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:hint="&#x0631;&#x0627;&#x0628;&#x0637; &#x0627;&#x0644;&#x0645;&#x062A;&#x0635;&#x0641;&#x062D; &#x0627;&#x0644;&#x062F;&#x0627;&#x062E;&#x0644;&#x064A; (&#x0627;&#x0644;&#x0627;&#x0641;&#x062A;&#x0631;&#x0627;&#x0636;&#x064A; Xbox)">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/webUrlBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textUri"/>
+                </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- الأزرار -->
+        <!-- &#x0627;&#x0644;&#x0623;&#x0632;&#x0631;&#x0627;&#x0631; -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStart"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="ابدأ الترجمة"
+            android:text="&#x0627;&#x0628;&#x062F;&#x0623; &#x0627;&#x0644;&#x062A;&#x0631;&#x062C;&#x0645;&#x0629;"
+            android:textSize="16sp"
+            app:cornerRadius="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStartWeb"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="&#x0627;&#x0628;&#x062F;&#x0623; &#x0627;&#x0644;&#x062A;&#x0631;&#x062C;&#x0645;&#x0629; &#x0648;&#x0627;&#x0641;&#x062A;&#x062D; &#x0627;&#x0644;&#x0645;&#x062A;&#x0635;&#x0641;&#x062D; (Xbox)"
             android:textSize="16sp"
             app:cornerRadius="16dp"
             android:layout_marginBottom="12dp"/>
@@ -172,7 +203,7 @@
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:text="إيقاف"
+            android:text="&#x0625;&#x064A;&#x0642;&#x0627;&#x0641;"
             app:cornerRadius="16dp"
             android:layout_marginBottom="12dp"/>
 
@@ -187,7 +218,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="تحديد المنطقة"
+                android:text="&#x062A;&#x062D;&#x062F;&#x064A;&#x062F; &#x0627;&#x0644;&#x0645;&#x0646;&#x0637;&#x0642;&#x0629;"
                 android:layout_marginEnd="8dp"
                 app:cornerRadius="16dp"/>
 
@@ -197,17 +228,17 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="الشاشة كاملة"
+                android:text="&#x0627;&#x0644;&#x0634;&#x0627;&#x0634;&#x0629; &#x0643;&#x0627;&#x0645;&#x0644;&#x0629;"
                 app:cornerRadius="16dp"/>
         </LinearLayout>
         
-        <!-- IP TV (اختياري) -->
+        <!-- IP TV (&#x0627;&#x062E;&#x062A;&#x064A;&#x0627;&#x0631;&#x064A;) -->
         <com.google.android.material.textfield.TextInputLayout
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:hint="IP التلفاز (اختياري)">
+            android:hint="IP &#x0627;&#x0644;&#x062A;&#x0644;&#x0641;&#x0627;&#x0632; (&#x0627;&#x062E;&#x062A;&#x064A;&#x0627;&#x0631;&#x064A;)">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/tvIpBox"
