@@ -9,14 +9,19 @@
     <application
         android:label="PS Translate"
         android:icon="@android:drawable/ic_menu_camera"
-        android:theme="@style/Theme.PsTranslate">  <!-- ✅ تم تعديل الثيم هنا -->
-        
+        android:theme="@style/Theme.PsTranslate">
+
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".WebActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
         <service
             android:name=".TranslateService"
             android:exported="false"
